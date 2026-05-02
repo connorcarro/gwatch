@@ -99,6 +99,18 @@ Then run `gwatch` in another terminal. The script randomly adds or removes one l
 
 `gwatch` is read-only. It watches filesystem changes, debounces refreshes, and shells out to Git for status and diffs.
 
+## Architecture
+
+The codebase is split by responsibility:
+
+- `cli`: command-line arguments
+- `runtime`: terminal lifecycle, input handling, refresh loop
+- `watcher`: filesystem watching and `.git` event filtering
+- `app`: review cockpit state, sorting, filtering, pinning, hunk navigation
+- `git`: Git repository discovery, status parsing, diff loading
+- `diff`: unified diff model and parser
+- `ui`: ratatui rendering and terminal components
+
 ## Troubleshooting
 
 If it looks like nothing happened:
