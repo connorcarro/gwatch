@@ -2,7 +2,7 @@
 
 Realtime Git working-tree diff TUI.
 
-`gwatch` is for watching **uncommitted working-tree changes** in a Git repo. It is most useful when another terminal, editor, or AI agent is actively editing files and you want a live terminal view of what changed.
+`gwatch` is for watching **uncommitted code changes** in a Git repo: staged changes, unstaged changes, and untracked files. It is most useful when another terminal, editor, or AI agent is actively editing files and you want a live terminal view of what changed.
 
 ## Usage
 
@@ -47,21 +47,51 @@ cargo install --path .
 The app opens a full-screen terminal UI:
 
 - left pane: changed files
-- right pane: inline diff for the selected file
-- header: watched repo path and refresh status
-- footer: keyboard controls
+- right pane: colored inline diff for the selected file
+- header: branch, watched repo path, active file, changed-file count, total added/deleted lines, refresh status
+- footer: compact command hints
 
-If the repo has no uncommitted changes, the file list will say `No changes`. To test it quickly:
+Diff rows include old/new line-number gutters, muted Git metadata, highlighted hunk headers, and colored added/deleted rows. Press `f` to toggle a full-width diff view when the split view feels too cramped. Press `w` to toggle wrapping for long lines.
+
+`gwatch` also keeps a lightweight in-memory cockpit view while it is open:
+
+- recently touched files are marked in the file list
+- `s` cycles sort modes: path, status, recent, size
+- `/` filters the changed-file list
+- `n`/`N` jumps between hunks in the active diff
+- `?` opens the help overlay
+
+If the repo has no uncommitted changes, the file list will say `No changes`. Committed history is not shown. To test it quickly:
 
 ```powershell
 Add-Content .\README.md "`nTesting gwatch"
 gwatch
 ```
 
+For continuous realtime testing, run this in one terminal:
+
+```powershell
+.\churn-test-file.ps1
+```
+
+Then run `gwatch` in another terminal. The script randomly adds or removes one line from `test.md` every second until you stop it with `Ctrl+C`.
+
 ## Controls
 
 - `j`/`Down`: next file
 - `k`/`Up`: previous file
+- mouse wheel: scroll diff
+- `d`/`PageDown`: scroll diff down
+- `u`/`PageUp`: scroll diff up
+- `g`/`Home`: jump to top of diff
+- `G`/`End`: jump to bottom of diff
+- `n`: jump to next hunk
+- `N`: jump to previous hunk
+- `/`: filter changed files
+- `s`: cycle file sort mode
+- `f`: toggle split view / full-width diff view
+- `w`: toggle diff line wrapping
+- `?`: show help
 - `Enter`: select file
 - `p`: pin or unpin the selected file
 - `r`: refresh
