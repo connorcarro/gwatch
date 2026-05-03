@@ -20,7 +20,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use crate::{
     app::{App, InputMode},
     cli::Cli,
-    git::{discover_repo, git_branch},
+    git::discover_repo,
     ui::draw,
     watcher::setup_watcher,
 };
@@ -34,16 +34,21 @@ pub fn run_app(cli: Cli) -> Result<()> {
 
     let mut terminal = setup_terminal()?;
     let result = run(&mut terminal, repo);
-    restore_terminal(&mut terminal)?;
-    result
+    let restore_result = restore_terminal(&mut terminal);
+
+    match (result, restore_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(err), _) => Err(err),
+        (Ok(()), Err(err)) => Err(err),
+    }
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, repo: PathBuf) -> Result<()> {
     let (watch_tx, watch_rx) = mpsc::channel();
     let mut _watcher = setup_watcher(&repo, watch_tx)?;
     let mut app = App::new(repo);
-    app.branch = git_branch(&app.repo).unwrap_or_else(|_| "unknown".to_string());
     app.refresh()?;
+    app.mark_baseline();
 
     let mut pending_refresh: Option<Instant> = None;
 
@@ -102,8 +107,8 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
 
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
-        KeyCode::Down | KeyCode::Char('j') => app.next()?,
-        KeyCode::Up | KeyCode::Char('k') => app.previous()?,
+        KeyCode::Down | KeyCode::Char('j') => app.select_next_file()?,
+        KeyCode::Up | KeyCode::Char('k') => app.select_previous_file()?,
         KeyCode::Enter => app.select()?,
         KeyCode::Char('p') => app.toggle_pin()?,
         KeyCode::Char('r') => app.refresh()?,
@@ -113,6 +118,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         KeyCode::End | KeyCode::Char('G') => app.scroll_diff_bottom(),
         KeyCode::Char('f') => app.toggle_view_mode(),
         KeyCode::Char('w') => app.toggle_wrap(),
+        KeyCode::Char('b') => app.toggle_session_scope()?,
         KeyCode::Char('s') => app.cycle_sort()?,
         KeyCode::Char('/') => app.enter_filter(),
         KeyCode::Char('?') => app.enter_help(),

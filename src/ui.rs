@@ -8,11 +8,13 @@ use ratatui::{
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
+use std::path::Path;
 
 use crate::{
     app::{App, InputMode, ViewMode},
     diff::{DiffKind, DiffLine},
     git::{FileStatus, display_path},
+    syntax::highlighted_spans,
 };
 
 pub fn draw(frame: &mut Frame<'_>, app: &App) {
@@ -56,6 +58,7 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
         ViewMode::Split => "split",
         ViewMode::DiffOnly => "diff",
     };
+    let scope = if app.session_only { "session" } else { "all" };
     let active = app
         .active_file()
         .map(|file| {
@@ -92,7 +95,7 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
             Span::raw(" "),
             Span::styled(format!("-{deleted}"), Style::default().fg(Color::Red)),
             Span::raw(format!(
-                "  mode:{mode}  sort:{}  wrap:{}{}",
+                "  mode:{mode}  scope:{scope}  sort:{}  wrap:{}{}",
                 app.sort_mode.label(),
                 app.wrap_diff,
                 pinned
@@ -151,6 +154,11 @@ fn draw_files(frame: &mut Frame<'_>, area: Rect, app: &App) {
                     " "
                 };
                 let recent = if app.is_recent(&file.path) { "!" } else { " " };
+                let session = if app.is_session_change(&file.path) {
+                    "~"
+                } else {
+                    " "
+                };
                 let added = file
                     .added
                     .map(|count| format!(" +{count}"))
@@ -171,6 +179,12 @@ fn draw_files(frame: &mut Frame<'_>, area: Rect, app: &App) {
                         format!("{recent} "),
                         Style::default()
                             .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{session} "),
+                        Style::default()
+                            .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
@@ -252,7 +266,12 @@ fn draw_diff(frame: &mut Frame<'_>, area: Rect, app: &App) {
             format!("Diff {}  {}  {}", position, hunk, display_path(path))
         })
         .unwrap_or_else(|| "Diff".to_string());
-    let lines: Vec<Line<'_>> = app.diff.iter().map(render_diff_line).collect();
+    let active_path = app.active_path().map(|path| path.as_path());
+    let lines: Vec<Line<'_>> = app
+        .diff
+        .iter()
+        .map(|line| render_diff_line(line, active_path))
+        .collect();
     let block = Block::default().title(title).borders(Borders::ALL);
     let inner = block.inner(area);
     let mut paragraph = Paragraph::new(lines)
@@ -295,6 +314,8 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect) {
             Span::raw("  "),
             key_hint("w", "wrap"),
             Span::raw("  "),
+            key_hint("b", "scope"),
+            Span::raw("  "),
             key_hint("p", "pin"),
             Span::raw("  "),
             key_hint("?", "help"),
@@ -325,6 +346,7 @@ fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect) {
         Line::from(""),
         Line::from("Cockpit"),
         Line::from("  /                   filter changed files"),
+        Line::from("  b                   toggle all changes/session changes"),
         Line::from("  s                   cycle sort: path, status, recent, size"),
         Line::from("  p                   pin/unpin selected file"),
         Line::from("  r                   refresh now"),
@@ -416,7 +438,8 @@ fn key_hint<'a>(key: &'a str, label: &'a str) -> Span<'a> {
 }
 
 fn compact_path(path: &str, max_len: usize) -> String {
-    if max_len == 0 || path.len() <= max_len {
+    let char_len = path.chars().count();
+    if max_len == 0 || char_len <= max_len {
         return path.to_string();
     }
     if max_len <= 3 {
@@ -424,11 +447,18 @@ fn compact_path(path: &str, max_len: usize) -> String {
     }
 
     let keep = max_len.saturating_sub(3);
-    let start = path.len().saturating_sub(keep);
-    format!("...{}", &path[start..])
+    let suffix: String = path
+        .chars()
+        .rev()
+        .take(keep)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("...{suffix}")
 }
 
-fn render_diff_line(line: &DiffLine) -> Line<'_> {
+fn render_diff_line(line: &DiffLine, path: Option<&Path>) -> Line<'static> {
     match line.kind {
         DiffKind::Header => Line::from(vec![
             render_line_number(None),
@@ -463,6 +493,7 @@ fn render_diff_line(line: &DiffLine) -> Line<'_> {
             line.text.strip_prefix('+').unwrap_or(&line.text),
             Color::Rgb(44, 214, 117),
             Color::Rgb(12, 45, 28),
+            path,
         ),
         DiffKind::Deleted => render_changed_line(
             "-",
@@ -471,33 +502,44 @@ fn render_diff_line(line: &DiffLine) -> Line<'_> {
             line.text.strip_prefix('-').unwrap_or(&line.text),
             Color::Rgb(255, 104, 104),
             Color::Rgb(58, 24, 24),
+            path,
         ),
-        DiffKind::Context => Line::from(vec![
-            render_line_number(line.old_line),
-            render_line_number(line.new_line),
-            Span::styled("    ", Style::default().fg(Color::DarkGray)),
-            Span::raw(clean_diff_text(&line.text)),
-        ]),
+        DiffKind::Context => {
+            let mut spans = vec![
+                render_line_number(line.old_line),
+                render_line_number(line.new_line),
+                Span::styled("    ", Style::default().fg(Color::DarkGray)),
+            ];
+            spans.extend(highlighted_spans(
+                path,
+                &clean_diff_text(&line.text),
+                Style::default(),
+            ));
+            Line::from(spans)
+        }
     }
 }
 
-fn render_changed_line<'a>(
+fn render_changed_line(
     mark: &'static str,
     old_line: Option<u32>,
     new_line: Option<u32>,
-    text: &'a str,
+    text: &str,
     fg: Color,
     bg: Color,
-) -> Line<'a> {
-    Line::from(vec![
+    path: Option<&Path>,
+) -> Line<'static> {
+    let style = Style::default().fg(fg).bg(bg);
+    let mut spans = vec![
         render_line_number(old_line),
         render_line_number(new_line),
         Span::styled(
             format!(" {mark}  "),
             Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(text, Style::default().fg(fg).bg(bg)),
-    ])
+    ];
+    spans.extend(highlighted_spans(path, text, style));
+    Line::from(spans)
 }
 
 fn render_line_number(line: Option<u32>) -> Span<'static> {
@@ -518,5 +560,46 @@ fn status_color(status: FileStatus) -> Color {
         FileStatus::Deleted => Color::Red,
         FileStatus::Renamed => Color::Cyan,
         FileStatus::Other => Color::Magenta,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compacts_ascii_paths() {
+        assert_eq!(compact_path("src/deep/main.rs", 10), "...main.rs");
+    }
+
+    #[test]
+    fn compacts_unicode_paths_without_slicing_inside_codepoint() {
+        assert_eq!(compact_path("src/naive/éclair.rs", 12), "...éclair.rs");
+    }
+
+    #[test]
+    fn renders_highlighted_context_line_without_losing_content() {
+        let line = DiffLine::with_numbers(DiffKind::Context, Some(1), Some(1), "fn main() {}");
+        let rendered = render_diff_line(&line, Some(Path::new("main.rs")));
+        let text: String = rendered
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert_eq!(text, "   1   1    fn main() {}");
+    }
+
+    #[test]
+    fn renders_highlighted_added_line_with_diff_marker() {
+        let line = DiffLine::with_numbers(DiffKind::Added, None, Some(3), "+let answer = 42;");
+        let rendered = render_diff_line(&line, Some(Path::new("main.rs")));
+        let text: String = rendered
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+
+        assert_eq!(text, "       3 +  let answer = 42;");
     }
 }

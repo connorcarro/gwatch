@@ -1,67 +1,70 @@
 # gwatch
 
-Realtime Git working-tree diff TUI.
+Read-only realtime Git working-tree diff TUI.
 
-`gwatch` is for watching **uncommitted code changes** in a Git repo: staged changes, unstaged changes, and untracked files. It is most useful when another terminal, editor, or AI agent is actively editing files and you want a live terminal view of what changed.
+`gwatch` helps you monitor **uncommitted code changes** in a Git repository: staged changes, unstaged changes, deleted files, renamed files, and untracked files. It is designed for review-heavy workflows where another terminal, editor, script, or AI coding agent is actively editing files and you want a live terminal view of what changed.
+
+## Why
+
+General Git TUIs are built around performing Git operations. `gwatch` is intentionally narrower: it stays read-only and focuses on fast situational awareness while code is changing.
+
+Useful when you want to:
+
+- supervise an AI agent without repeatedly running `git status` and `git diff`
+- keep a live diff open next to an editor or terminal session
+- separate changes that existed before you started watching from changes made during the current session
+- review untracked files with inline previews
 
 ## Usage
 
-If you have not installed the command yet, run this once from the repo root:
-
-```powershell
-.\install.ps1
-```
-
-Run it from inside a Git repo:
+Run it from inside a Git repository:
 
 ```powershell
 gwatch
 ```
 
-Or point it at a repo from anywhere:
+Or point it at a repository from anywhere:
 
 ```powershell
 gwatch --repo C:\path\to\repo
 ```
 
-If you are running from source:
+Run from source:
 
 ```powershell
 cargo run -- --repo C:\path\to\repo
 ```
 
-From this repo, you can also run it before installing with:
-
-```powershell
-cargo run --
-```
-
-To install the command locally:
+Install locally with Cargo:
 
 ```powershell
 cargo install --path .
 ```
 
-## What You Should See
+On Windows, you can also run the included installer from this repository:
 
-The app opens a full-screen terminal UI:
+```powershell
+.\install.ps1
+```
 
-- left pane: changed files
-- right pane: colored inline diff for the selected file
-- header: branch, watched repo path, active file, changed-file count, total added/deleted lines, refresh status
-- footer: compact command hints
+## Features
 
-Diff rows include old/new line-number gutters, muted Git metadata, highlighted hunk headers, and colored added/deleted rows. Press `f` to toggle a full-width diff view when the split view feels too cramped. Press `w` to toggle wrapping for long lines.
+The app opens a full-screen terminal UI with:
 
-`gwatch` also keeps a lightweight in-memory cockpit view while it is open:
+- changed-file list with status, added/deleted counts, recent-change markers, and session-change markers
+- colored inline diff with old/new line number gutters and syntax highlighting for common languages and config formats
+- branch, repository path, active file, total changed files, total added/deleted lines, refresh status, current sort mode, and current scope
+- split view and full-width diff view
+- filtering, sorting, pinning, hunk navigation, mouse-wheel scrolling, and line wrapping
+- session scope, which hides changes that existed before `gwatch` started and shows only files touched or added during the current watch session
 
-- recently touched files are marked in the file list
-- `s` cycles sort modes: path, status, recent, size
-- `/` filters the changed-file list
-- `n`/`N` jumps between hunks in the active diff
-- `?` opens the help overlay
+`gwatch` shells out to Git for status and diffs, watches filesystem events, and debounces refreshes so rapid editor or agent writes do not constantly redraw the UI.
 
-If the repo has no uncommitted changes, the file list will say `No changes`. Committed history is not shown. To test it quickly:
+Syntax highlighting is powered by `syntect`, using bundled Sublime Text syntax definitions for a broad set of file extensions.
+
+## Testing It
+
+If the repository has no uncommitted changes, the file list will say `No working-tree changes`. To test it quickly:
 
 ```powershell
 Add-Content .\README.md "`nTesting gwatch"
@@ -89,6 +92,7 @@ Then run `gwatch` in another terminal. The script randomly adds or removes one l
 - `N`: jump to previous hunk
 - `/`: filter changed files
 - `s`: cycle file sort mode
+- `b`: toggle all changes / current-session changes
 - `f`: toggle split view / full-width diff view
 - `w`: toggle diff line wrapping
 - `?`: show help
@@ -98,6 +102,17 @@ Then run `gwatch` in another terminal. The script randomly adds or removes one l
 - `q`/`Esc`: quit
 
 `gwatch` is read-only. It watches filesystem changes, debounces refreshes, and shells out to Git for status and diffs.
+
+## Development
+
+Run the full local check before publishing changes:
+
+```powershell
+cargo fmt -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets --all-features
+cargo package --allow-dirty --offline --no-verify
+```
 
 ## Architecture
 
@@ -110,6 +125,10 @@ The codebase is split by responsibility:
 - `git`: Git repository discovery, status parsing, diff loading
 - `diff`: unified diff model and parser
 - `ui`: ratatui rendering and terminal components
+
+## License
+
+MIT
 
 ## Troubleshooting
 

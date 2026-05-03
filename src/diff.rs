@@ -135,4 +135,49 @@ diff --git a/a.txt b/a.txt
         assert_eq!(diff[5].old_line, None);
         assert_eq!(diff[5].new_line, Some(22));
     }
+
+    #[test]
+    fn classifies_extended_git_headers() {
+        let diff = parse_diff_text(
+            "\
+diff --git a/old.rs b/new.rs
+similarity index 92%
+rename from old.rs
+rename to new.rs
+index 1111111..2222222 100644
+--- a/old.rs
++++ b/new.rs
+@@ -1 +1 @@
+-old
++new",
+        );
+
+        assert!(
+            diff[..7]
+                .iter()
+                .all(|line| matches!(line.kind, DiffKind::Header | DiffKind::Hunk))
+        );
+        let hunk = diff
+            .iter()
+            .position(|line| matches!(line.kind, DiffKind::Hunk))
+            .unwrap();
+        let deleted = diff
+            .iter()
+            .position(|line| matches!(line.kind, DiffKind::Deleted))
+            .unwrap();
+        let added = diff
+            .iter()
+            .position(|line| matches!(line.kind, DiffKind::Added))
+            .unwrap();
+
+        assert!(hunk < deleted);
+        assert!(deleted < added);
+    }
+
+    #[test]
+    fn parses_single_line_hunk_without_explicit_counts() {
+        let starts = parse_hunk_starts("@@ -42 +99 @@ fn main()");
+
+        assert_eq!(starts, Some((42, 99)));
+    }
 }

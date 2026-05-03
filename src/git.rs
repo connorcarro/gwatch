@@ -9,6 +9,8 @@ use anyhow::{Context, Result, anyhow, bail};
 
 use crate::diff::{DiffKind, DiffLine, parse_diff_text};
 
+type Numstat = BTreeMap<PathBuf, (Option<u32>, Option<u32>)>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileStatus {
     Added,
@@ -137,12 +139,15 @@ fn status_from_xy(x: char, y: char) -> FileStatus {
     }
 }
 
-fn git_numstat(repo: &Path) -> Result<BTreeMap<PathBuf, (Option<u32>, Option<u32>)>> {
+fn git_numstat(repo: &Path) -> Result<Numstat> {
     let output = git(repo, ["diff", "--numstat", "-z", "HEAD", "--"])
         .or_else(|_| git(repo, ["diff", "--numstat", "-z"]))?;
+    Ok(parse_numstat(&output.stdout))
+}
+
+fn parse_numstat(bytes: &[u8]) -> Numstat {
     let mut stats = BTreeMap::new();
-    let mut parts = output
-        .stdout
+    let mut parts = bytes
         .split(|byte| *byte == 0)
         .filter(|part| !part.is_empty());
 
@@ -162,7 +167,7 @@ fn git_numstat(repo: &Path) -> Result<BTreeMap<PathBuf, (Option<u32>, Option<u32
         }
     }
 
-    Ok(stats)
+    stats
 }
 
 fn parse_count(bytes: &[u8]) -> Option<u32> {
@@ -295,6 +300,30 @@ mod tests {
         assert_eq!(
             parsed,
             vec![(PathBuf::from("new.txt"), FileStatus::Renamed)]
+        );
+    }
+
+    #[test]
+    fn parses_regular_numstat_entries() {
+        let parsed = parse_numstat(b"12\t3\tsrc/main.rs\0-\t-\tassets/logo.png\0");
+
+        assert_eq!(
+            parsed.get(&PathBuf::from("src/main.rs")),
+            Some(&(Some(12), Some(3)))
+        );
+        assert_eq!(
+            parsed.get(&PathBuf::from("assets/logo.png")),
+            Some(&(None, None))
+        );
+    }
+
+    #[test]
+    fn parses_renamed_numstat_entries() {
+        let parsed = parse_numstat(b"5\t2\0old.rs\0src/new.rs\0");
+
+        assert_eq!(
+            parsed,
+            BTreeMap::from([(PathBuf::from("src/new.rs"), (Some(5), Some(2)))])
         );
     }
 }

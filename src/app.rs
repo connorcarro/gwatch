@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -8,7 +8,9 @@ use anyhow::Result;
 
 use crate::{
     diff::{DiffKind, DiffLine},
-    git::{ChangedFile, FileStatus, display_path, git_changed_files, git_diff_for_status},
+    git::{
+        ChangedFile, FileStatus, display_path, git_branch, git_changed_files, git_diff_for_status,
+    },
 };
 
 pub const RECENT_WINDOW: Duration = Duration::from_secs(8);
@@ -68,6 +70,9 @@ pub struct App {
     pub sort_mode: SortMode,
     pub input_mode: InputMode,
     pub filter: String,
+    pub session_only: bool,
+    pub baseline_paths: HashSet<PathBuf>,
+    pub session_paths: HashSet<PathBuf>,
     pub recent: HashMap<PathBuf, Instant>,
     pub status: String,
     pub last_refresh: Instant,
@@ -89,6 +94,9 @@ impl App {
             sort_mode: SortMode::Path,
             input_mode: InputMode::Normal,
             filter: String::new(),
+            session_only: false,
+            baseline_paths: HashSet::new(),
+            session_paths: HashSet::new(),
             recent: HashMap::new(),
             status: "Starting".to_string(),
             last_refresh: Instant::now(),
@@ -97,6 +105,7 @@ impl App {
 
     pub fn refresh(&mut self) -> Result<()> {
         let previous_selection = self.active_path().cloned();
+        self.branch = git_branch(&self.repo).unwrap_or_else(|_| "unknown".to_string());
         self.all_files = git_changed_files(&self.repo)?;
         self.rebuild_files();
         self.reselect(previous_selection.as_ref());
@@ -113,7 +122,9 @@ impl App {
             .all_files
             .iter()
             .filter(|file| {
-                filter.is_empty() || file.display_path.to_ascii_lowercase().contains(&filter)
+                let matches_filter =
+                    filter.is_empty() || file.display_path.to_ascii_lowercase().contains(&filter);
+                matches_filter && (!self.session_only || self.is_session_change(&file.path))
             })
             .cloned()
             .collect();
@@ -126,11 +137,11 @@ impl App {
             return;
         }
 
-        if let Some(path) = previous {
-            if let Some(index) = self.files.iter().position(|file| &file.path == path) {
-                self.selected = index;
-                return;
-            }
+        if let Some(path) = previous
+            && let Some(index) = self.files.iter().position(|file| &file.path == path)
+        {
+            self.selected = index;
+            return;
         }
 
         self.selected = self.selected.min(self.files.len().saturating_sub(1));
@@ -171,7 +182,7 @@ impl App {
         }
     }
 
-    pub fn next(&mut self) -> Result<()> {
+    pub fn select_next_file(&mut self) -> Result<()> {
         if !self.files.is_empty() {
             self.selected = (self.selected + 1).min(self.files.len() - 1);
             if self.pinned.is_none() {
@@ -182,7 +193,7 @@ impl App {
         Ok(())
     }
 
-    pub fn previous(&mut self) -> Result<()> {
+    pub fn select_previous_file(&mut self) -> Result<()> {
         if !self.files.is_empty() {
             self.selected = self.selected.saturating_sub(1);
             if self.pinned.is_none() {
@@ -243,6 +254,27 @@ impl App {
         self.wrap_diff = !self.wrap_diff;
     }
 
+    pub fn mark_baseline(&mut self) {
+        self.baseline_paths = self
+            .all_files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect();
+        self.session_paths.clear();
+    }
+
+    pub fn toggle_session_scope(&mut self) -> Result<()> {
+        let previous_selection = self.active_path().cloned();
+        self.session_only = !self.session_only;
+        self.rebuild_files();
+        self.reselect(previous_selection.as_ref());
+        if self.pinned.is_none() {
+            self.diff = self.load_active_diff()?;
+            self.diff_scroll = 0;
+        }
+        Ok(())
+    }
+
     pub fn cycle_sort(&mut self) -> Result<()> {
         let previous_selection = self.active_path().cloned();
         self.sort_mode = self.sort_mode.next();
@@ -283,7 +315,8 @@ impl App {
         let now = Instant::now();
         for path in paths {
             if let Some(relative) = relative_repo_path(&self.repo, &path) {
-                self.recent.insert(relative, now);
+                self.recent.insert(relative.clone(), now);
+                self.session_paths.insert(relative);
             }
         }
     }
@@ -292,6 +325,10 @@ impl App {
         self.recent
             .get(path)
             .is_some_and(|changed| changed.elapsed() <= RECENT_WINDOW)
+    }
+
+    pub fn is_session_change(&self, path: &Path) -> bool {
+        self.session_paths.contains(path) || !self.baseline_paths.contains(path)
     }
 
     pub fn hunk_positions(&self) -> Vec<usize> {
@@ -480,6 +517,38 @@ diff --git a/a.txt b/a.txt
         app.note_changed_paths(vec![repo.join("src/main.rs")]);
 
         assert!(app.is_recent(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn session_scope_filters_to_paths_changed_after_baseline() {
+        let repo = PathBuf::from("C:/repo");
+        let mut app = App::new(repo.clone());
+        app.all_files = vec![
+            changed("src/main.rs", FileStatus::Modified),
+            changed("src/lib.rs", FileStatus::Modified),
+        ];
+        app.mark_baseline();
+        app.note_changed_paths(vec![repo.join("src/lib.rs")]);
+        app.pinned = Some(PathBuf::from("pinned.rs"));
+
+        app.toggle_session_scope().unwrap();
+
+        assert_eq!(app.files.len(), 1);
+        assert_eq!(app.files[0].path, PathBuf::from("src/lib.rs"));
+    }
+
+    #[test]
+    fn session_scope_includes_files_added_after_baseline_even_without_event() {
+        let mut app = App::new(PathBuf::from("."));
+        app.all_files = vec![changed("existing.rs", FileStatus::Modified)];
+        app.mark_baseline();
+        app.all_files.push(changed("new.rs", FileStatus::Untracked));
+        app.pinned = Some(PathBuf::from("pinned.rs"));
+
+        app.toggle_session_scope().unwrap();
+
+        assert_eq!(app.files.len(), 1);
+        assert_eq!(app.files[0].path, PathBuf::from("new.rs"));
     }
 
     fn changed(path: &str, status: FileStatus) -> ChangedFile {
