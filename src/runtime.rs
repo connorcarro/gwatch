@@ -27,6 +27,10 @@ use crate::{
 
 const DEBOUNCE: Duration = Duration::from_millis(180);
 const POLL_RATE: Duration = Duration::from_millis(50);
+const WHEEL_SCROLL_LINES: usize = 3;
+const CTRL_WHEEL_MIN_LINES: usize = 250;
+const CTRL_WHEEL_MAX_LINES: usize = 250_000;
+const CTRL_WHEEL_DIVISOR: usize = 100;
 
 pub fn run_app(cli: Cli) -> Result<()> {
     let start_dir = cli.repo.unwrap_or(std::env::current_dir()?);
@@ -71,9 +75,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, repo: PathBuf) -> 
                     Ok(false) => {}
                     Err(err) => app.status = err.to_string(),
                 },
-                CEvent::Mouse(mouse) => {
-                    handle_mouse(&mut app, mouse.kind);
-                }
+                CEvent::Mouse(mouse) => handle_mouse(&mut app, mouse.kind, mouse.modifiers),
                 _ => {}
             }
         }
@@ -150,12 +152,29 @@ fn handle_filter_key(app: &mut App, key: KeyEvent) -> Result<bool> {
     Ok(false)
 }
 
-fn handle_mouse(app: &mut App, kind: MouseEventKind) {
+fn handle_mouse(app: &mut App, kind: MouseEventKind, modifiers: KeyModifiers) {
+    let amount = if modifiers.contains(KeyModifiers::CONTROL) {
+        accelerated_scroll_amount(app.diff_len())
+    } else {
+        WHEEL_SCROLL_LINES
+    };
+
     match kind {
-        MouseEventKind::ScrollDown => app.scroll_diff_down(3),
-        MouseEventKind::ScrollUp => app.scroll_diff_up(3),
+        MouseEventKind::ScrollDown => app.scroll_diff_down(amount),
+        MouseEventKind::ScrollUp => app.scroll_diff_up(amount),
         _ => {}
     }
+}
+
+fn accelerated_scroll_amount(diff_len: usize) -> usize {
+    if diff_len == 0 {
+        return WHEEL_SCROLL_LINES;
+    }
+
+    diff_len
+        .saturating_div(CTRL_WHEEL_DIVISOR)
+        .clamp(CTRL_WHEEL_MIN_LINES, CTRL_WHEEL_MAX_LINES)
+        .min(diff_len)
 }
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
@@ -191,5 +210,23 @@ fn drain_watch_events(
     while let Ok(paths) = rx.try_recv() {
         app.note_changed_paths(paths);
         *pending_refresh = Some(Instant::now() + DEBOUNCE);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accelerated_scroll_scales_with_diff_size() {
+        assert_eq!(accelerated_scroll_amount(0), WHEEL_SCROLL_LINES);
+        assert_eq!(accelerated_scroll_amount(1_000), CTRL_WHEEL_MIN_LINES);
+        assert_eq!(accelerated_scroll_amount(1_000_000), 10_000);
+        assert_eq!(accelerated_scroll_amount(100_000_000), CTRL_WHEEL_MAX_LINES);
+    }
+
+    #[test]
+    fn accelerated_scroll_never_exceeds_diff_size() {
+        assert_eq!(accelerated_scroll_amount(10), 10);
     }
 }

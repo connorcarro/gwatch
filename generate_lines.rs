@@ -17,7 +17,6 @@ impl FastRng {
 
     #[inline(always)]
     fn next(&mut self) -> u64 {
-        // SplitMix64 – extremely fast, high-quality PRNG (much faster than Python's random)
         self.state = self.state.wrapping_add(0x9e3779b97f4a7c15);
         let mut z = self.state;
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -30,31 +29,45 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <millions> [output_file]", args[0]);
-        eprintln!("  millions: number of millions of lines (e.g. 2 for 2,000,000 lines)");
+        eprintln!("  millions: number of millions of lines (e.g. 2, 1.5, 0.25)");
         std::process::exit(1);
     }
 
-    let millions: u64 = match args[1].parse() {
-        Ok(n) => n,
-        Err(_) => {
-            eprintln!("Error: '{}' is not a valid number", args[1]);
+    let input = &args[1];
+    let millions: f64 = match input.parse::<f64>() {
+        Ok(n) if n > 0.0 => n,
+        Ok(_) => {
+            eprintln!("Error: millions must be greater than 0");
             std::process::exit(1);
+        }
+        Err(_) => {
+            // Support both . and , as decimal separator
+            let fixed = input.replace(',', ".");
+            match fixed.parse::<f64>() {
+                Ok(n) if n > 0.0 => n,
+                _ => {
+                    eprintln!("Error: '{}' is not a valid number", input);
+                    std::process::exit(1);
+                }
+            }
         }
     };
 
     let output = if args.len() > 2 { &args[2] } else { "output.txt" };
-    let total_lines = millions * 1_000_000;
+    let total_lines = (millions * 1_000_000.0).round() as u64;
+
+    if total_lines == 0 {
+        eprintln!("Error: resulting line count would be zero");
+        std::process::exit(1);
+    }
 
     let start = Instant::now();
-
     let file = File::create(output).expect("failed to create output file");
-    // 64 MiB buffer (much larger than Python's 8 MiB) for maximum write throughput
     let mut writer = BufWriter::with_capacity(64 * 1024 * 1024, file);
 
     let mut rng = FastRng::new();
     let charset_len = CHARSET.len() as u64;
 
-    // Reusable stack-allocated line buffer – zero allocations per line
     let mut line = [0u8; CHARS_PER_LINE + 1];
     line[CHARS_PER_LINE] = b'\n';
 
@@ -71,9 +84,7 @@ fn main() {
     let elapsed = start.elapsed();
     let seconds = elapsed.as_secs_f64();
 
-    println!("Finished writing {} in {:.2} seconds", output, seconds);
-
-    // Bonus: show real throughput (not in original Python)
+    println!("Finished writing {} lines to {} in {:.2}s", total_lines, output, seconds);
     let mb_written = (total_lines * (CHARS_PER_LINE + 1) as u64) as f64 / (1024.0 * 1024.0);
     println!(
         "Throughput: {:.1} MB/s  ({:.2} million lines/sec)",

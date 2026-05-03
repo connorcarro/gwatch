@@ -373,7 +373,9 @@ impl App {
         {
             let start = range.start - cache.range.start;
             let end = start + (range.end - range.start);
-            return Ok(cache.lines[start..end].to_vec());
+            if end <= cache.lines.len() {
+                return Ok(cache.lines[start..end].to_vec());
+            }
         }
 
         let lines = diff.lines(range.clone())?;
@@ -616,6 +618,24 @@ diff --git a/a.txt b/a.txt
             vec!["15", "16", "17"]
         );
         assert_eq!(app.diff_line_cache.as_ref().unwrap().range, 10..30);
+    }
+
+    #[test]
+    fn diff_line_cache_miss_when_cached_lines_are_shorter_than_range() {
+        let mut app = App::new(PathBuf::from("."));
+        app.set_diff(
+            DiffDocument::from_lines((0..5).map(|index| DiffLine::context(index.to_string())))
+                .unwrap(),
+        );
+        app.diff_line_cache = Some(DiffLineCache {
+            range: 0..10,
+            lines: vec![DiffLine::context("short")],
+        });
+
+        let lines = app.diff_lines(0..5).unwrap();
+
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[4].text, "4");
     }
 
     #[test]

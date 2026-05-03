@@ -4,7 +4,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
         atomic::{AtomicU64, Ordering},
     },
     thread,
@@ -16,6 +16,13 @@ use crate::diff::{DiffKind, DiffLine};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const NONE_LINE: u32 = u32::MAX;
+const MAX_RECORD_TEXT_BYTES: u64 = 16 * 1024 * 1024;
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 pub struct DiffDocument {
     inner: DiffDocumentInner,
@@ -50,7 +57,7 @@ struct LazyUntrackedState {
 
 struct AsyncSpoolDocument {
     path: PathBuf,
-    file: Arc<Mutex<File>>,
+    file: Mutex<File>,
     state: Arc<Mutex<AsyncSpoolState>>,
 }
 
@@ -105,17 +112,24 @@ impl DiffDocument {
             .create_new(true)
             .open(&path)
             .with_context(|| format!("failed to create {}", path.display()))?;
-        let file = Arc::new(Mutex::new(file));
+        let read_file = OpenOptions::new()
+            .read(true)
+            .open(&path)
+            .with_context(|| format!("failed to open {}", path.display()))?;
         let state = Arc::new(Mutex::new(AsyncSpoolState {
             offsets: Vec::new(),
             hunk_positions: Vec::new(),
             done: false,
             error: None,
         }));
-        spawn_async_spool_writer(file.clone(), state.clone(), job);
+        spawn_async_spool_writer(file, state.clone(), job);
 
         Ok(Self {
-            inner: DiffDocumentInner::AsyncSpool(AsyncSpoolDocument { path, file, state }),
+            inner: DiffDocumentInner::AsyncSpool(AsyncSpoolDocument {
+                path,
+                file: Mutex::new(read_file),
+                state,
+            }),
         })
     }
 
@@ -142,12 +156,7 @@ impl DiffDocument {
     pub fn hunk_count(&self) -> usize {
         match &self.inner {
             DiffDocumentInner::Spool(doc) => doc.hunk_positions.len(),
-            DiffDocumentInner::AsyncSpool(doc) => doc
-                .state
-                .lock()
-                .expect("async diff state lock poisoned")
-                .hunk_positions
-                .len(),
+            DiffDocumentInner::AsyncSpool(doc) => lock(&doc.state).hunk_positions.len(),
             DiffDocumentInner::LazyUntracked(_) => 0,
         }
     }
@@ -155,13 +164,9 @@ impl DiffDocument {
     pub fn hunk_ordinal_at_or_after(&self, scroll: usize) -> Option<usize> {
         match &self.inner {
             DiffDocumentInner::Spool(doc) => hunk_ordinal_at_or_after(&doc.hunk_positions, scroll),
-            DiffDocumentInner::AsyncSpool(doc) => hunk_ordinal_at_or_after(
-                &doc.state
-                    .lock()
-                    .expect("async diff state lock poisoned")
-                    .hunk_positions,
-                scroll,
-            ),
+            DiffDocumentInner::AsyncSpool(doc) => {
+                hunk_ordinal_at_or_after(&lock(&doc.state).hunk_positions, scroll)
+            }
             DiffDocumentInner::LazyUntracked(_) => None,
         }
     }
@@ -169,13 +174,9 @@ impl DiffDocument {
     pub fn next_hunk_after(&self, scroll: usize) -> Option<usize> {
         match &self.inner {
             DiffDocumentInner::Spool(doc) => next_hunk_after(&doc.hunk_positions, scroll),
-            DiffDocumentInner::AsyncSpool(doc) => next_hunk_after(
-                &doc.state
-                    .lock()
-                    .expect("async diff state lock poisoned")
-                    .hunk_positions,
-                scroll,
-            ),
+            DiffDocumentInner::AsyncSpool(doc) => {
+                next_hunk_after(&lock(&doc.state).hunk_positions, scroll)
+            }
             DiffDocumentInner::LazyUntracked(_) => None,
         }
     }
@@ -183,13 +184,9 @@ impl DiffDocument {
     pub fn previous_hunk_before(&self, scroll: usize) -> Option<usize> {
         match &self.inner {
             DiffDocumentInner::Spool(doc) => previous_hunk_before(&doc.hunk_positions, scroll),
-            DiffDocumentInner::AsyncSpool(doc) => previous_hunk_before(
-                &doc.state
-                    .lock()
-                    .expect("async diff state lock poisoned")
-                    .hunk_positions,
-                scroll,
-            ),
+            DiffDocumentInner::AsyncSpool(doc) => {
+                previous_hunk_before(&lock(&doc.state).hunk_positions, scroll)
+            }
             DiffDocumentInner::LazyUntracked(_) => None,
         }
     }
@@ -230,18 +227,18 @@ impl Drop for DiffDocument {
 }
 
 pub struct AsyncDiffWriter {
-    file: Arc<Mutex<File>>,
+    file: File,
     state: Arc<Mutex<AsyncSpoolState>>,
 }
 
 impl AsyncDiffWriter {
     pub fn push(&mut self, line: &DiffLine) -> Result<()> {
-        let mut file = self.file.lock().expect("async diff file lock poisoned");
-        let offset = file
+        let offset = self
+            .file
             .stream_position()
             .context("failed to write async diff document")?;
-        write_record(&mut file, line)?;
-        let mut state = self.state.lock().expect("async diff state lock poisoned");
+        write_record(&mut self.file, line)?;
+        let mut state = lock(&self.state);
         if matches!(line.kind, DiffKind::Hunk) {
             let position = state.offsets.len();
             state.hunk_positions.push(position);
@@ -308,7 +305,7 @@ impl SpoolDocument {
             return Ok(None);
         };
 
-        let mut file = self.file.lock().expect("diff document lock poisoned");
+        let mut file = lock(&self.file);
         file.seek(SeekFrom::Start(offset))
             .context("failed to seek diff document")?;
         read_record(&mut file).map(Some)
@@ -325,7 +322,7 @@ impl SpoolDocument {
             return Ok(Vec::new());
         }
 
-        let mut file = self.file.lock().expect("diff document lock poisoned");
+        let mut file = lock(&self.file);
         file.seek(SeekFrom::Start(self.offsets[start]))
             .context("failed to seek diff document")?;
 
@@ -339,7 +336,7 @@ impl SpoolDocument {
 
 impl AsyncSpoolDocument {
     fn len(&self) -> usize {
-        let state = self.state.lock().expect("async diff state lock poisoned");
+        let state = lock(&self.state);
         if state.done {
             state.offsets.len()
         } else {
@@ -348,17 +345,14 @@ impl AsyncSpoolDocument {
     }
 
     fn is_complete(&self) -> bool {
-        self.state
-            .lock()
-            .expect("async diff state lock poisoned")
-            .done
+        lock(&self.state).done
     }
 
     fn line(&self, index: usize) -> Result<Option<DiffLine>> {
-        let state = self.state.lock().expect("async diff state lock poisoned");
+        let state = lock(&self.state);
         if let Some(offset) = state.offsets.get(index).copied() {
             drop(state);
-            let mut file = self.file.lock().expect("async diff file lock poisoned");
+            let mut file = lock(&self.file);
             file.seek(SeekFrom::Start(offset))
                 .context("failed to seek async diff document")?;
             return read_record(&mut file).map(Some);
@@ -394,17 +388,17 @@ impl AsyncSpoolDocument {
 }
 
 fn spawn_async_spool_writer(
-    file: Arc<Mutex<File>>,
+    file: File,
     state: Arc<Mutex<AsyncSpoolState>>,
     job: impl FnOnce(AsyncDiffWriter) -> Result<()> + Send + 'static,
 ) {
     thread::spawn(move || {
         let writer = AsyncDiffWriter {
-            file: file.clone(),
+            file,
             state: state.clone(),
         };
         let result = job(writer);
-        let mut state = state.lock().expect("async diff state lock poisoned");
+        let mut state = lock(&state);
         if let Err(err) = result {
             state.error = Some(err.to_string());
         }
@@ -416,15 +410,12 @@ impl LazyUntrackedDocument {
     const HEADER_LINES: usize = 4;
 
     fn len(&self) -> usize {
-        let state = self.state.lock().expect("lazy diff state lock poisoned");
+        let state = lock(&self.state);
         Self::HEADER_LINES + state.visible_len_estimate()
     }
 
     fn is_complete(&self) -> bool {
-        self.state
-            .lock()
-            .expect("lazy diff state lock poisoned")
-            .eof
+        lock(&self.state).eof
     }
 
     fn line(&self, index: usize) -> Result<Option<DiffLine>> {
@@ -457,7 +448,7 @@ impl LazyUntrackedDocument {
             1 => DiffLine::new(DiffKind::Header, "new file mode 100644"),
             2 => DiffLine::new(DiffKind::Header, "--- /dev/null"),
             3 => DiffLine::new(DiffKind::Header, format!("+++ b/{}", self.display_path)),
-            _ => unreachable!("invalid untracked header index"),
+            _ => DiffLine::context("Invalid untracked header line."),
         }
     }
 
@@ -475,7 +466,7 @@ impl LazyUntrackedDocument {
         }
 
         let mut bytes = vec![0; end.saturating_sub(start) as usize];
-        let mut file = self.file.lock().expect("lazy diff file lock poisoned");
+        let mut file = lock(&self.file);
         file.seek(SeekFrom::Start(start))
             .with_context(|| format!("failed to seek {}", self.path.display()))?;
         file.read_exact(&mut bytes)
@@ -491,7 +482,7 @@ impl LazyUntrackedDocument {
     }
 
     fn line_bounds(&self, index: usize) -> Option<(u64, u64, bool)> {
-        let state = self.state.lock().expect("lazy diff state lock poisoned");
+        let state = lock(&self.state);
         let start = *state.offsets.get(index)?;
         if let Some(end) = state.offsets.get(index.saturating_add(1)).copied() {
             return Some((start, end, false));
@@ -532,9 +523,7 @@ fn temp_path() -> PathBuf {
 fn spawn_untracked_indexer(path: PathBuf, state: Arc<Mutex<LazyUntrackedState>>) {
     thread::spawn(move || {
         if let Err(_err) = index_untracked_file(&path, &state) {
-            if let Ok(mut state) = state.lock() {
-                state.eof = true;
-            }
+            lock(&state).eof = true;
         }
     });
 }
@@ -551,7 +540,7 @@ fn index_untracked_file(path: &Path, state: &Arc<Mutex<LazyUntrackedState>>) -> 
             .read(&mut buffer)
             .with_context(|| format!("failed to index {}", path.display()))?;
         if read == 0 {
-            let mut state = state.lock().expect("lazy diff state lock poisoned");
+            let mut state = lock(state);
             if state.offsets.last().copied() == Some(state.file_len) && state.file_len > 0 {
                 state.offsets.pop();
             }
@@ -568,7 +557,7 @@ fn index_untracked_file(path: &Path, state: &Arc<Mutex<LazyUntrackedState>>) -> 
         }
         absolute += read as u64;
 
-        let mut state = state.lock().expect("lazy diff state lock poisoned");
+        let mut state = lock(state);
         state.offsets.extend(pending_offsets.iter().copied());
         state.indexed_to = absolute;
     }
@@ -632,6 +621,9 @@ fn read_record(file: &mut File) -> Result<DiffLine> {
     let old_line = read_optional_u32(file)?;
     let new_line = read_optional_u32(file)?;
     let text_len = read_u64(file)?;
+    if text_len > MAX_RECORD_TEXT_BYTES {
+        bail!("diff record text length {text_len} exceeds safety limit");
+    }
     let text_len: usize = text_len
         .try_into()
         .context("diff record is too large to read")?;

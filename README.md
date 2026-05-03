@@ -57,7 +57,7 @@ The app opens a full-screen terminal UI with:
 - colored inline diff with old/new line number gutters and syntax highlighting for common languages and config formats
 - branch, repository path, active file, total changed files, total added/deleted lines, refresh status, current sort mode, and current scope
 - split view and full-width diff view
-- filtering, sorting, pinning, hunk navigation, mouse-wheel scrolling, and line wrapping
+- filtering, sorting, pinning, hunk navigation, mouse-wheel scrolling, accelerated Ctrl+mouse-wheel scrolling, and line wrapping
 - session scope, which hides changes that existed before `gwatch` started and shows only files touched or added during the current watch session
 - large-diff handling: diff output is streamed into a disk-backed document, rendering is virtualized to the visible terminal rows, and hunk positions are cached for fast navigation
 
@@ -87,6 +87,7 @@ Then run `gwatch` in another terminal. The script randomly adds or removes one l
 - `j`/`Down`: next file
 - `k`/`Up`: previous file
 - mouse wheel: scroll diff
+- `Ctrl` + mouse wheel: accelerated diff scroll, proportional to diff size
 - `d`/`PageDown`: scroll diff down
 - `u`/`PageUp`: scroll diff up
 - `g`/`Home`: jump to top of diff
