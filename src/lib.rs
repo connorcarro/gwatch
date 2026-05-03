@@ -1,6 +1,7 @@
 pub mod app;
 pub mod cli;
 pub mod diff;
+pub mod diff_document;
 pub mod git;
 pub mod runtime;
 pub mod syntax;

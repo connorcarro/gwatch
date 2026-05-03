@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     ffi::OsStr,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
@@ -8,8 +7,15 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::diff::{DiffKind, DiffLine, DiffParser, max_diff_lines, truncation_marker};
+use crate::{
+    diff::{DiffLine, DiffParser},
+    diff_document::{AsyncDiffWriter, DiffDocument},
+};
 
+#[cfg(test)]
+use std::collections::BTreeMap;
+
+#[cfg(test)]
 type Numstat = BTreeMap<PathBuf, (Option<u32>, Option<u32>)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,19 +76,15 @@ pub fn git_branch(repo: &Path) -> Result<String> {
 pub fn git_changed_files(repo: &Path) -> Result<Vec<ChangedFile>> {
     let status_output = git(repo, ["status", "--porcelain=v1", "-z"])?;
     let entries = parse_status(&status_output.stdout);
-    let stats = git_numstat(repo).unwrap_or_default();
 
     let mut files: Vec<_> = entries
         .into_iter()
-        .map(|(path, status)| {
-            let (added, deleted) = stats.get(&path).copied().unwrap_or((None, None));
-            ChangedFile {
-                display_path: display_path(&path),
-                path,
-                status,
-                added,
-                deleted,
-            }
+        .map(|(path, status)| ChangedFile {
+            display_path: display_path(&path),
+            path,
+            status,
+            added: None,
+            deleted: None,
         })
         .collect();
 
@@ -90,7 +92,7 @@ pub fn git_changed_files(repo: &Path) -> Result<Vec<ChangedFile>> {
     Ok(files)
 }
 
-pub fn git_diff_for_status(repo: &Path, path: &Path, status: FileStatus) -> Result<Vec<DiffLine>> {
+pub fn git_diff_for_status(repo: &Path, path: &Path, status: FileStatus) -> Result<DiffDocument> {
     match status {
         FileStatus::Untracked => git_untracked_preview(repo, path),
         _ => git_diff(repo, path),
@@ -140,12 +142,7 @@ fn status_from_xy(x: char, y: char) -> FileStatus {
     }
 }
 
-fn git_numstat(repo: &Path) -> Result<Numstat> {
-    let output = git(repo, ["diff", "--numstat", "-z", "HEAD", "--"])
-        .or_else(|_| git(repo, ["diff", "--numstat", "-z"]))?;
-    Ok(parse_numstat(&output.stdout))
-}
-
+#[cfg(test)]
 fn parse_numstat(bytes: &[u8]) -> Numstat {
     let mut stats = BTreeMap::new();
     let mut parts = bytes
@@ -171,61 +168,28 @@ fn parse_numstat(bytes: &[u8]) -> Numstat {
     stats
 }
 
+#[cfg(test)]
 fn parse_count(bytes: &[u8]) -> Option<u32> {
     std::str::from_utf8(bytes).ok()?.parse().ok()
 }
 
-fn git_diff(repo: &Path, path: &Path) -> Result<Vec<DiffLine>> {
-    let lines = stream_git_path(repo, ["diff", "HEAD", "--"], path)
-        .or_else(|_| stream_git_path(repo, ["diff", "--"], path))?;
-    if lines.is_empty() {
-        return Ok(vec![DiffLine::context("No current diff.")]);
-    }
-    Ok(lines)
+fn git_diff(repo: &Path, path: &Path) -> Result<DiffDocument> {
+    async_git_path(repo, path)
 }
 
-fn git_untracked_preview(repo: &Path, path: &Path) -> Result<Vec<DiffLine>> {
+fn git_untracked_preview(repo: &Path, path: &Path) -> Result<DiffDocument> {
     let full_path = repo.join(path);
     if !full_path.is_file() {
-        return Ok(vec![DiffLine::context(
+        return DiffDocument::from_lines([DiffLine::context(
             "Untracked path is not a regular file.",
         )]);
     }
 
     if is_binary_file(&full_path)? {
-        return Ok(vec![DiffLine::context("Binary untracked file.")]);
+        return DiffDocument::from_lines([DiffLine::context("Binary untracked file.")]);
     }
 
-    let mut lines = vec![
-        DiffLine::new(
-            DiffKind::Header,
-            format!(
-                "diff --git a/{} b/{}",
-                display_path(path),
-                display_path(path)
-            ),
-        ),
-        DiffLine::new(DiffKind::Header, "new file mode 100644"),
-        DiffLine::new(DiffKind::Header, "--- /dev/null"),
-        DiffLine::new(DiffKind::Header, format!("+++ b/{}", display_path(path))),
-    ];
-    let max_lines = max_diff_lines();
-    let file = std::fs::File::open(&full_path)
-        .with_context(|| format!("failed to read {}", full_path.display()))?;
-    for (index, line) in BufReader::new(file).lines().enumerate() {
-        if lines.len() >= max_lines {
-            lines.push(truncation_marker(max_lines));
-            break;
-        }
-        let line = line.with_context(|| format!("failed to read {}", full_path.display()))?;
-        lines.push(DiffLine::with_numbers(
-            DiffKind::Added,
-            None,
-            Some(index.saturating_add(1).min(u32::MAX as usize) as u32),
-            format!("+{line}"),
-        ));
-    }
-    Ok(lines)
+    DiffDocument::lazy_untracked(full_path, display_path(path))
 }
 
 fn is_binary_file(path: &Path) -> Result<bool> {
@@ -257,7 +221,42 @@ where
     Ok(output)
 }
 
-fn stream_git_path<I, S>(repo: &Path, args: I, path: &Path) -> Result<Vec<DiffLine>>
+fn async_git_path(repo: &Path, path: &Path) -> Result<DiffDocument> {
+    let repo = repo.to_path_buf();
+    let path = path.to_path_buf();
+    DiffDocument::async_spool(move |writer| {
+        match stream_git_path(&repo, ["diff", "HEAD", "--"], &path, writer) {
+            Ok(()) => Ok(()),
+            Err(writer) => match stream_git_path(&repo, ["diff", "--"], &path, writer) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(anyhow!("failed to load git diff")),
+            },
+        }
+    })
+}
+
+fn stream_git_path<I, S>(
+    repo: &Path,
+    args: I,
+    path: &Path,
+    mut writer: AsyncDiffWriter,
+) -> std::result::Result<(), AsyncDiffWriter>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    match try_stream_git_path(repo, args, path, &mut writer) {
+        Ok(()) => Ok(()),
+        Err(_) => Err(writer),
+    }
+}
+
+fn try_stream_git_path<I, S>(
+    repo: &Path,
+    args: I,
+    path: &Path,
+    writer: &mut AsyncDiffWriter,
+) -> Result<()>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -277,24 +276,12 @@ where
         .take()
         .context("failed to capture git stdout")?;
     let mut parser = DiffParser::new();
-    let mut lines = Vec::new();
-    let mut truncated = false;
-    let max_lines = max_diff_lines();
+    let mut wrote_any = false;
 
     for line in BufReader::new(stdout).lines() {
         let line = line.context("failed to read git diff output")?;
-        if lines.len() >= max_lines {
-            truncated = true;
-            break;
-        }
-        lines.push(parser.parse_line(&line));
-    }
-
-    if truncated {
-        let _ = child.kill();
-        let _ = child.wait();
-        lines.push(truncation_marker(max_lines));
-        return Ok(lines);
+        writer.push(&parser.parse_line(&line))?;
+        wrote_any = true;
     }
 
     let output = child
@@ -304,8 +291,10 @@ where
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!(stderr.trim().to_string()));
     }
-
-    Ok(lines)
+    if !wrote_any {
+        writer.push(&DiffLine::context("No current diff."))?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    ops::Range,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -7,7 +8,8 @@ use std::{
 use anyhow::Result;
 
 use crate::{
-    diff::{DiffKind, DiffLine},
+    diff::DiffLine,
+    diff_document::DiffDocument,
     git::{
         ChangedFile, FileStatus, display_path, git_branch, git_changed_files, git_diff_for_status,
     },
@@ -63,8 +65,8 @@ pub struct App {
     pub files: Vec<ChangedFile>,
     pub selected: usize,
     pub pinned: Option<PathBuf>,
-    pub diff: Vec<DiffLine>,
-    pub diff_hunks: Vec<usize>,
+    pub diff: Option<DiffDocument>,
+    pub diff_line_cache: Option<DiffLineCache>,
     pub diff_scroll: usize,
     pub wrap_diff: bool,
     pub view_mode: ViewMode,
@@ -88,8 +90,8 @@ impl App {
             files: Vec::new(),
             selected: 0,
             pinned: None,
-            diff: Vec::new(),
-            diff_hunks: Vec::new(),
+            diff: None,
+            diff_line_cache: None,
             diff_scroll: 0,
             wrap_diff: false,
             view_mode: ViewMode::Split,
@@ -170,14 +172,14 @@ impl App {
         self.all_files.iter().find(|file| &file.path == path)
     }
 
-    pub fn load_active_diff(&self) -> Result<Vec<DiffLine>> {
+    pub fn load_active_diff(&self) -> Result<DiffDocument> {
         let Some(path) = self.active_path() else {
-            return Ok(vec![DiffLine::context("No working-tree changes.")]);
+            return DiffDocument::from_lines([DiffLine::context("No working-tree changes.")]);
         };
 
         match self.active_status() {
             Some(status) => git_diff_for_status(&self.repo, path, status),
-            None => Ok(vec![DiffLine::context(format!(
+            None => DiffDocument::from_lines([DiffLine::context(format!(
                 "{} has no current diff.",
                 display_path(path)
             ))]),
@@ -242,7 +244,7 @@ impl App {
     }
 
     pub fn scroll_diff_bottom(&mut self) {
-        self.diff_scroll = self.diff.len().saturating_sub(1);
+        self.diff_scroll = self.diff_len().saturating_sub(1);
     }
 
     pub fn toggle_view_mode(&mut self) {
@@ -333,22 +335,64 @@ impl App {
         self.session_paths.contains(path) || !self.baseline_paths.contains(path)
     }
 
-    pub fn set_diff(&mut self, diff: Vec<DiffLine>) {
-        self.diff_hunks = diff
-            .iter()
-            .enumerate()
-            .filter_map(|(index, line)| matches!(line.kind, DiffKind::Hunk).then_some(index))
-            .collect();
-        self.diff = diff;
+    pub fn set_diff(&mut self, diff: DiffDocument) {
+        self.diff = Some(diff);
+        self.diff_line_cache = None;
+    }
+
+    pub fn diff_len(&self) -> usize {
+        self.diff.as_ref().map_or(0, DiffDocument::len)
+    }
+
+    pub fn diff_is_empty(&self) -> bool {
+        self.diff.as_ref().is_none_or(DiffDocument::is_empty)
+    }
+
+    pub fn diff_hunks(&self) -> &[usize] {
+        self.diff.as_ref().map_or(&[], DiffDocument::hunk_positions)
+    }
+
+    pub fn hunk_count(&self) -> usize {
+        self.diff.as_ref().map_or(0, DiffDocument::hunk_count)
+    }
+
+    pub fn hunk_ordinal_at_or_after_scroll(&self) -> Option<usize> {
+        self.diff
+            .as_ref()
+            .and_then(|diff| diff.hunk_ordinal_at_or_after(self.diff_scroll))
+    }
+
+    pub fn diff_lines(&mut self, range: Range<usize>) -> Result<Vec<DiffLine>> {
+        let Some(diff) = &self.diff else {
+            return Ok(Vec::new());
+        };
+
+        if let Some(cache) = &self.diff_line_cache
+            && cache.range.start <= range.start
+            && cache.range.end >= range.end
+        {
+            let start = range.start - cache.range.start;
+            let end = start + (range.end - range.start);
+            return Ok(cache.lines[start..end].to_vec());
+        }
+
+        let lines = diff.lines(range.clone())?;
+        if diff.is_complete() {
+            self.diff_line_cache = Some(DiffLineCache {
+                range,
+                lines: lines.clone(),
+            });
+        } else {
+            self.diff_line_cache = None;
+        }
+        Ok(lines)
     }
 
     pub fn next_hunk(&mut self) {
         let Some(next) = self
-            .diff_hunks
-            .iter()
-            .copied()
-            .find(|position| *position > self.diff_scroll)
-            .or_else(|| self.diff_hunks.first().copied())
+            .diff
+            .as_ref()
+            .and_then(|diff| diff.next_hunk_after(self.diff_scroll))
         else {
             return;
         };
@@ -357,12 +401,9 @@ impl App {
 
     pub fn previous_hunk(&mut self) {
         let Some(previous) = self
-            .diff_hunks
-            .iter()
-            .rev()
-            .copied()
-            .find(|position| *position < self.diff_scroll)
-            .or_else(|| self.diff_hunks.last().copied())
+            .diff
+            .as_ref()
+            .and_then(|diff| diff.previous_hunk_before(self.diff_scroll))
         else {
             return;
         };
@@ -370,7 +411,7 @@ impl App {
     }
 
     pub fn clamp_diff_scroll(&mut self) {
-        let max = self.diff.len().saturating_sub(1);
+        let max = self.diff_len().saturating_sub(1);
         self.diff_scroll = self.diff_scroll.min(max);
     }
 
@@ -384,6 +425,11 @@ impl App {
                 )
             })
     }
+}
+
+pub struct DiffLineCache {
+    pub range: Range<usize>,
+    pub lines: Vec<DiffLine>,
 }
 
 pub fn sort_files(
@@ -493,8 +539,9 @@ mod tests {
     #[test]
     fn jumps_between_hunks() {
         let mut app = App::new(PathBuf::from("."));
-        app.set_diff(crate::diff::parse_diff_text(
-            "\
+        app.set_diff(
+            DiffDocument::from_lines(crate::diff::parse_diff_text(
+                "\
 diff --git a/a.txt b/a.txt
 @@ -1 +1 @@
 -a
@@ -502,7 +549,9 @@ diff --git a/a.txt b/a.txt
 @@ -10 +10 @@
 -x
 +y",
-        ));
+            ))
+            .unwrap(),
+        );
 
         app.next_hunk();
         assert_eq!(app.diff_scroll, 1);
@@ -516,9 +565,10 @@ diff --git a/a.txt b/a.txt
     fn diff_scroll_supports_positions_beyond_u16() {
         let mut app = App::new(PathBuf::from("."));
         app.set_diff(
-            (0..100_000)
-                .map(|index| DiffLine::context(index.to_string()))
-                .collect(),
+            DiffDocument::from_lines(
+                (0..100_000).map(|index| DiffLine::context(index.to_string())),
+            )
+            .unwrap(),
         );
 
         app.scroll_diff_bottom();
@@ -529,8 +579,9 @@ diff --git a/a.txt b/a.txt
     #[test]
     fn caches_hunks_when_diff_is_set() {
         let mut app = App::new(PathBuf::from("."));
-        app.set_diff(crate::diff::parse_diff_text(
-            "\
+        app.set_diff(
+            DiffDocument::from_lines(crate::diff::parse_diff_text(
+                "\
 diff --git a/a.txt b/a.txt
 @@ -1 +1 @@
 -a
@@ -538,9 +589,33 @@ diff --git a/a.txt b/a.txt
 @@ -50 +50 @@
 -x
 +y",
-        ));
+            ))
+            .unwrap(),
+        );
 
-        assert_eq!(app.diff_hunks, vec![1, 4]);
+        assert_eq!(app.diff_hunks(), &[1, 4]);
+    }
+
+    #[test]
+    fn diff_lines_reuses_cached_superset_range() {
+        let mut app = App::new(PathBuf::from("."));
+        app.set_diff(
+            DiffDocument::from_lines((0..100).map(|index| DiffLine::context(index.to_string())))
+                .unwrap(),
+        );
+
+        let first = app.diff_lines(10..30).unwrap();
+        let second = app.diff_lines(15..18).unwrap();
+
+        assert_eq!(first[5].text, "15");
+        assert_eq!(
+            second
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["15", "16", "17"]
+        );
+        assert_eq!(app.diff_line_cache.as_ref().unwrap().range, 10..30);
     }
 
     #[test]

@@ -15,9 +15,6 @@ pub enum DiffKind {
     Context,
 }
 
-pub const DEFAULT_MAX_DIFF_LINES: usize = 200_000;
-pub const MAX_DIFF_LINES_ENV: &str = "GWATCH_MAX_DIFF_LINES";
-
 impl DiffLine {
     pub fn new(kind: DiffKind, text: impl Into<String>) -> Self {
         Self::with_numbers(kind, None, None, text)
@@ -101,20 +98,6 @@ impl Default for DiffParser {
     fn default() -> Self {
         Self::new()
     }
-}
-
-pub fn truncation_marker(max_lines: usize) -> DiffLine {
-    DiffLine::context(format!(
-        "Diff preview truncated after {max_lines} lines to keep gwatch responsive. Use git diff directly for the complete output."
-    ))
-}
-
-pub fn max_diff_lines() -> usize {
-    std::env::var(MAX_DIFF_LINES_ENV)
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_MAX_DIFF_LINES)
 }
 
 fn is_diff_header(line: &str) -> bool {
@@ -230,13 +213,5 @@ index 1111111..2222222 100644
         assert_eq!(added.new_line, Some(200));
         assert_eq!(context.old_line, Some(101));
         assert_eq!(context.new_line, Some(201));
-    }
-
-    #[test]
-    fn truncation_marker_explains_preview_limit() {
-        let marker = truncation_marker(123);
-
-        assert!(marker.text.contains("123"));
-        assert!(marker.text.contains("truncated"));
     }
 }

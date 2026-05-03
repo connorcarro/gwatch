@@ -59,18 +59,11 @@ The app opens a full-screen terminal UI with:
 - split view and full-width diff view
 - filtering, sorting, pinning, hunk navigation, mouse-wheel scrolling, and line wrapping
 - session scope, which hides changes that existed before `gwatch` started and shows only files touched or added during the current watch session
-- large-diff protection: diff output is streamed, rendering is virtualized to the visible terminal rows, hunk positions are cached, and extreme diffs are truncated to keep the TUI responsive
+- large-diff handling: diff output is streamed into a disk-backed document, rendering is virtualized to the visible terminal rows, and hunk positions are cached for fast navigation
 
 `gwatch` shells out to Git for status and diffs, watches filesystem events, and debounces refreshes so rapid editor or agent writes do not constantly redraw the UI.
 
 Syntax highlighting is powered by `syntect`, using bundled Sublime Text syntax definitions plus `gwatch` aliases for many modern file types that do not always have exact bundled grammars. Common Rust, C/C++, Go, Java, C#, Swift, JavaScript, TypeScript, JSX/TSX, Python, Ruby, PHP, shell, PowerShell, SQL, HTML, CSS, SCSS, Markdown, JSON, TOML, YAML, Terraform, Dockerfile, Makefile, protobuf, XML, SVG, and config files are highlighted.
-
-By default, a single diff preview is capped at 200,000 lines. This prevents massive generated files or multi-million-line changes from freezing the terminal. To raise or lower that limit for your machine, set `GWATCH_MAX_DIFF_LINES` before launching:
-
-```powershell
-$env:GWATCH_MAX_DIFF_LINES = "500000"
-gwatch
-```
 
 ## Testing It
 

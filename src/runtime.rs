@@ -53,7 +53,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, repo: PathBuf) -> 
     let mut pending_refresh: Option<Instant> = None;
 
     loop {
-        terminal.draw(|frame| draw(frame, &app))?;
+        terminal.draw(|frame| draw(frame, &mut app))?;
 
         drain_watch_events(&watch_rx, &mut pending_refresh, &mut app);
 
