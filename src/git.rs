@@ -1,13 +1,14 @@
 use std::{
     collections::BTreeMap,
     ffi::OsStr,
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::diff::{DiffKind, DiffLine, parse_diff_text};
+use crate::diff::{DiffKind, DiffLine, DiffParser, max_diff_lines, truncation_marker};
 
 type Numstat = BTreeMap<PathBuf, (Option<u32>, Option<u32>)>;
 
@@ -175,13 +176,12 @@ fn parse_count(bytes: &[u8]) -> Option<u32> {
 }
 
 fn git_diff(repo: &Path, path: &Path) -> Result<Vec<DiffLine>> {
-    let output = git_path(repo, ["diff", "HEAD", "--"], path)
-        .or_else(|_| git_path(repo, ["diff", "--"], path))?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    if text.is_empty() {
+    let lines = stream_git_path(repo, ["diff", "HEAD", "--"], path)
+        .or_else(|_| stream_git_path(repo, ["diff", "--"], path))?;
+    if lines.is_empty() {
         return Ok(vec![DiffLine::context("No current diff.")]);
     }
-    Ok(parse_diff_text(&text))
+    Ok(lines)
 }
 
 fn git_untracked_preview(repo: &Path, path: &Path) -> Result<Vec<DiffLine>> {
@@ -192,13 +192,10 @@ fn git_untracked_preview(repo: &Path, path: &Path) -> Result<Vec<DiffLine>> {
         )]);
     }
 
-    let content = std::fs::read(&full_path)
-        .with_context(|| format!("failed to read {}", full_path.display()))?;
-    if content.contains(&0) {
+    if is_binary_file(&full_path)? {
         return Ok(vec![DiffLine::context("Binary untracked file.")]);
     }
 
-    let text = String::from_utf8_lossy(&content);
     let mut lines = vec![
         DiffLine::new(
             DiffKind::Header,
@@ -212,7 +209,15 @@ fn git_untracked_preview(repo: &Path, path: &Path) -> Result<Vec<DiffLine>> {
         DiffLine::new(DiffKind::Header, "--- /dev/null"),
         DiffLine::new(DiffKind::Header, format!("+++ b/{}", display_path(path))),
     ];
-    for (index, line) in text.lines().enumerate() {
+    let max_lines = max_diff_lines();
+    let file = std::fs::File::open(&full_path)
+        .with_context(|| format!("failed to read {}", full_path.display()))?;
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        if lines.len() >= max_lines {
+            lines.push(truncation_marker(max_lines));
+            break;
+        }
+        let line = line.with_context(|| format!("failed to read {}", full_path.display()))?;
         lines.push(DiffLine::with_numbers(
             DiffKind::Added,
             None,
@@ -221,6 +226,15 @@ fn git_untracked_preview(repo: &Path, path: &Path) -> Result<Vec<DiffLine>> {
         ));
     }
     Ok(lines)
+}
+
+fn is_binary_file(path: &Path) -> Result<bool> {
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut buffer = [0; 8192];
+    let read = std::io::Read::read(&mut file, &mut buffer)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(buffer[..read].contains(&0))
 }
 
 fn git<I, S>(repo: &Path, args: I) -> Result<std::process::Output>
@@ -243,25 +257,55 @@ where
     Ok(output)
 }
 
-fn git_path<I, S>(repo: &Path, args: I, path: &Path) -> Result<std::process::Output>
+fn stream_git_path<I, S>(repo: &Path, args: I, path: &Path) -> Result<Vec<DiffLine>>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = Command::new("git")
+    let mut child = Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(args)
         .arg(path)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .context("failed to run git")?;
 
+    let stdout = child
+        .stdout
+        .take()
+        .context("failed to capture git stdout")?;
+    let mut parser = DiffParser::new();
+    let mut lines = Vec::new();
+    let mut truncated = false;
+    let max_lines = max_diff_lines();
+
+    for line in BufReader::new(stdout).lines() {
+        let line = line.context("failed to read git diff output")?;
+        if lines.len() >= max_lines {
+            truncated = true;
+            break;
+        }
+        lines.push(parser.parse_line(&line));
+    }
+
+    if truncated {
+        let _ = child.kill();
+        let _ = child.wait();
+        lines.push(truncation_marker(max_lines));
+        return Ok(lines);
+    }
+
+    let output = child
+        .wait_with_output()
+        .context("failed to finish git diff")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!(stderr.trim().to_string()));
     }
 
-    Ok(output)
+    Ok(lines)
 }
 
 #[cfg(unix)]

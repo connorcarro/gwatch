@@ -64,7 +64,8 @@ pub struct App {
     pub selected: usize,
     pub pinned: Option<PathBuf>,
     pub diff: Vec<DiffLine>,
-    pub diff_scroll: u16,
+    pub diff_hunks: Vec<usize>,
+    pub diff_scroll: usize,
     pub wrap_diff: bool,
     pub view_mode: ViewMode,
     pub sort_mode: SortMode,
@@ -88,6 +89,7 @@ impl App {
             selected: 0,
             pinned: None,
             diff: Vec::new(),
+            diff_hunks: Vec::new(),
             diff_scroll: 0,
             wrap_diff: false,
             view_mode: ViewMode::Split,
@@ -109,7 +111,7 @@ impl App {
         self.all_files = git_changed_files(&self.repo)?;
         self.rebuild_files();
         self.reselect(previous_selection.as_ref());
-        self.diff = self.load_active_diff()?;
+        self.set_diff(self.load_active_diff()?);
         self.clamp_diff_scroll();
         self.status = "Ready".to_string();
         self.last_refresh = Instant::now();
@@ -186,7 +188,7 @@ impl App {
         if !self.files.is_empty() {
             self.selected = (self.selected + 1).min(self.files.len() - 1);
             if self.pinned.is_none() {
-                self.diff = self.load_active_diff()?;
+                self.set_diff(self.load_active_diff()?);
                 self.diff_scroll = 0;
             }
         }
@@ -197,7 +199,7 @@ impl App {
         if !self.files.is_empty() {
             self.selected = self.selected.saturating_sub(1);
             if self.pinned.is_none() {
-                self.diff = self.load_active_diff()?;
+                self.set_diff(self.load_active_diff()?);
                 self.diff_scroll = 0;
             }
         }
@@ -207,7 +209,7 @@ impl App {
     pub fn select(&mut self) -> Result<()> {
         if let Some(file) = self.files.get(self.selected) {
             self.pinned = None;
-            self.diff = git_diff_for_status(&self.repo, &file.path, file.status)?;
+            self.set_diff(git_diff_for_status(&self.repo, &file.path, file.status)?);
             self.diff_scroll = 0;
         }
         Ok(())
@@ -220,18 +222,18 @@ impl App {
             } else {
                 self.pinned = Some(file.path.clone());
             }
-            self.diff = self.load_active_diff()?;
+            self.set_diff(self.load_active_diff()?);
             self.diff_scroll = 0;
         }
         Ok(())
     }
 
-    pub fn scroll_diff_down(&mut self, amount: u16) {
+    pub fn scroll_diff_down(&mut self, amount: usize) {
         self.diff_scroll = self.diff_scroll.saturating_add(amount);
         self.clamp_diff_scroll();
     }
 
-    pub fn scroll_diff_up(&mut self, amount: u16) {
+    pub fn scroll_diff_up(&mut self, amount: usize) {
         self.diff_scroll = self.diff_scroll.saturating_sub(amount);
     }
 
@@ -240,7 +242,7 @@ impl App {
     }
 
     pub fn scroll_diff_bottom(&mut self) {
-        self.diff_scroll = self.diff.len().saturating_sub(1).min(u16::MAX as usize) as u16;
+        self.diff_scroll = self.diff.len().saturating_sub(1);
     }
 
     pub fn toggle_view_mode(&mut self) {
@@ -269,7 +271,7 @@ impl App {
         self.rebuild_files();
         self.reselect(previous_selection.as_ref());
         if self.pinned.is_none() {
-            self.diff = self.load_active_diff()?;
+            self.set_diff(self.load_active_diff()?);
             self.diff_scroll = 0;
         }
         Ok(())
@@ -281,7 +283,7 @@ impl App {
         self.rebuild_files();
         self.reselect(previous_selection.as_ref());
         if self.pinned.is_none() {
-            self.diff = self.load_active_diff()?;
+            self.set_diff(self.load_active_diff()?);
             self.diff_scroll = 0;
         }
         Ok(())
@@ -305,7 +307,7 @@ impl App {
         self.rebuild_files();
         self.reselect(previous_selection.as_ref());
         if self.pinned.is_none() {
-            self.diff = self.load_active_diff()?;
+            self.set_diff(self.load_active_diff()?);
             self.diff_scroll = 0;
         }
         Ok(())
@@ -331,43 +333,44 @@ impl App {
         self.session_paths.contains(path) || !self.baseline_paths.contains(path)
     }
 
-    pub fn hunk_positions(&self) -> Vec<usize> {
-        self.diff
+    pub fn set_diff(&mut self, diff: Vec<DiffLine>) {
+        self.diff_hunks = diff
             .iter()
             .enumerate()
             .filter_map(|(index, line)| matches!(line.kind, DiffKind::Hunk).then_some(index))
-            .collect()
+            .collect();
+        self.diff = diff;
     }
 
     pub fn next_hunk(&mut self) {
-        let positions = self.hunk_positions();
-        let Some(next) = positions
+        let Some(next) = self
+            .diff_hunks
             .iter()
             .copied()
-            .find(|position| *position > self.diff_scroll as usize)
-            .or_else(|| positions.first().copied())
+            .find(|position| *position > self.diff_scroll)
+            .or_else(|| self.diff_hunks.first().copied())
         else {
             return;
         };
-        self.diff_scroll = next.min(u16::MAX as usize) as u16;
+        self.diff_scroll = next;
     }
 
     pub fn previous_hunk(&mut self) {
-        let positions = self.hunk_positions();
-        let Some(previous) = positions
+        let Some(previous) = self
+            .diff_hunks
             .iter()
             .rev()
             .copied()
-            .find(|position| *position < self.diff_scroll as usize)
-            .or_else(|| positions.last().copied())
+            .find(|position| *position < self.diff_scroll)
+            .or_else(|| self.diff_hunks.last().copied())
         else {
             return;
         };
-        self.diff_scroll = previous.min(u16::MAX as usize) as u16;
+        self.diff_scroll = previous;
     }
 
     pub fn clamp_diff_scroll(&mut self) {
-        let max = self.diff.len().saturating_sub(1).min(u16::MAX as usize) as u16;
+        let max = self.diff.len().saturating_sub(1);
         self.diff_scroll = self.diff_scroll.min(max);
     }
 
@@ -490,7 +493,7 @@ mod tests {
     #[test]
     fn jumps_between_hunks() {
         let mut app = App::new(PathBuf::from("."));
-        app.diff = crate::diff::parse_diff_text(
+        app.set_diff(crate::diff::parse_diff_text(
             "\
 diff --git a/a.txt b/a.txt
 @@ -1 +1 @@
@@ -499,7 +502,7 @@ diff --git a/a.txt b/a.txt
 @@ -10 +10 @@
 -x
 +y",
-        );
+        ));
 
         app.next_hunk();
         assert_eq!(app.diff_scroll, 1);
@@ -507,6 +510,37 @@ diff --git a/a.txt b/a.txt
         assert_eq!(app.diff_scroll, 4);
         app.previous_hunk();
         assert_eq!(app.diff_scroll, 1);
+    }
+
+    #[test]
+    fn diff_scroll_supports_positions_beyond_u16() {
+        let mut app = App::new(PathBuf::from("."));
+        app.set_diff(
+            (0..100_000)
+                .map(|index| DiffLine::context(index.to_string()))
+                .collect(),
+        );
+
+        app.scroll_diff_bottom();
+
+        assert_eq!(app.diff_scroll, 99_999);
+    }
+
+    #[test]
+    fn caches_hunks_when_diff_is_set() {
+        let mut app = App::new(PathBuf::from("."));
+        app.set_diff(crate::diff::parse_diff_text(
+            "\
+diff --git a/a.txt b/a.txt
+@@ -1 +1 @@
+-a
++b
+@@ -50 +50 @@
+-x
++y",
+        ));
+
+        assert_eq!(app.diff_hunks, vec![1, 4]);
     }
 
     #[test]

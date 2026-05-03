@@ -15,6 +15,9 @@ pub enum DiffKind {
     Context,
 }
 
+pub const DEFAULT_MAX_DIFF_LINES: usize = 200_000;
+pub const MAX_DIFF_LINES_ENV: &str = "GWATCH_MAX_DIFF_LINES";
+
 impl DiffLine {
     pub fn new(kind: DiffKind, text: impl Into<String>) -> Self {
         Self::with_numbers(kind, None, None, text)
@@ -40,48 +43,78 @@ impl DiffLine {
 }
 
 pub fn parse_diff_text(text: &str) -> Vec<DiffLine> {
+    let mut parser = DiffParser::new();
     let mut lines = Vec::new();
-    let mut old_line = 0;
-    let mut new_line = 0;
 
     for line in text.lines() {
-        if line.starts_with("@@") {
-            if let Some((old_start, new_start)) = parse_hunk_starts(line) {
-                old_line = old_start;
-                new_line = new_start;
-            }
-            lines.push(DiffLine::new(DiffKind::Hunk, line));
-        } else if is_diff_header(line) {
-            lines.push(DiffLine::new(DiffKind::Header, line));
-        } else if line.starts_with('+') {
-            lines.push(DiffLine::with_numbers(
-                DiffKind::Added,
-                None,
-                Some(new_line),
-                line,
-            ));
-            new_line = new_line.saturating_add(1);
-        } else if line.starts_with('-') {
-            lines.push(DiffLine::with_numbers(
-                DiffKind::Deleted,
-                Some(old_line),
-                None,
-                line,
-            ));
-            old_line = old_line.saturating_add(1);
-        } else {
-            lines.push(DiffLine::with_numbers(
-                DiffKind::Context,
-                Some(old_line),
-                Some(new_line),
-                line,
-            ));
-            old_line = old_line.saturating_add(1);
-            new_line = new_line.saturating_add(1);
-        }
+        lines.push(parser.parse_line(line));
     }
 
     lines
+}
+
+pub struct DiffParser {
+    old_line: u32,
+    new_line: u32,
+}
+
+impl DiffParser {
+    pub fn new() -> Self {
+        Self {
+            old_line: 0,
+            new_line: 0,
+        }
+    }
+
+    pub fn parse_line(&mut self, line: &str) -> DiffLine {
+        if line.starts_with("@@") {
+            if let Some((old_start, new_start)) = parse_hunk_starts(line) {
+                self.old_line = old_start;
+                self.new_line = new_start;
+            }
+            DiffLine::new(DiffKind::Hunk, line)
+        } else if is_diff_header(line) {
+            DiffLine::new(DiffKind::Header, line)
+        } else if line.starts_with('+') {
+            let parsed = DiffLine::with_numbers(DiffKind::Added, None, Some(self.new_line), line);
+            self.new_line = self.new_line.saturating_add(1);
+            parsed
+        } else if line.starts_with('-') {
+            let parsed = DiffLine::with_numbers(DiffKind::Deleted, Some(self.old_line), None, line);
+            self.old_line = self.old_line.saturating_add(1);
+            parsed
+        } else {
+            let parsed = DiffLine::with_numbers(
+                DiffKind::Context,
+                Some(self.old_line),
+                Some(self.new_line),
+                line,
+            );
+            self.old_line = self.old_line.saturating_add(1);
+            self.new_line = self.new_line.saturating_add(1);
+            parsed
+        }
+    }
+}
+
+impl Default for DiffParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn truncation_marker(max_lines: usize) -> DiffLine {
+    DiffLine::context(format!(
+        "Diff preview truncated after {max_lines} lines to keep gwatch responsive. Use git diff directly for the complete output."
+    ))
+}
+
+pub fn max_diff_lines() -> usize {
+    std::env::var(MAX_DIFF_LINES_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_MAX_DIFF_LINES)
 }
 
 fn is_diff_header(line: &str) -> bool {
@@ -179,5 +212,31 @@ index 1111111..2222222 100644
         let starts = parse_hunk_starts("@@ -42 +99 @@ fn main()");
 
         assert_eq!(starts, Some((42, 99)));
+    }
+
+    #[test]
+    fn parser_can_incrementally_parse_without_full_diff_string() {
+        let mut parser = DiffParser::new();
+
+        let hunk = parser.parse_line("@@ -100 +200 @@");
+        let deleted = parser.parse_line("-old");
+        let added = parser.parse_line("+new");
+        let context = parser.parse_line("same");
+
+        assert!(matches!(hunk.kind, DiffKind::Hunk));
+        assert_eq!(deleted.old_line, Some(100));
+        assert_eq!(deleted.new_line, None);
+        assert_eq!(added.old_line, None);
+        assert_eq!(added.new_line, Some(200));
+        assert_eq!(context.old_line, Some(101));
+        assert_eq!(context.new_line, Some(201));
+    }
+
+    #[test]
+    fn truncation_marker_explains_preview_limit() {
+        let marker = truncation_marker(123);
+
+        assert!(marker.text.contains("123"));
+        assert!(marker.text.contains("truncated"));
     }
 }

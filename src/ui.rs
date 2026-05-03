@@ -8,7 +8,7 @@ use ratatui::{
         ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
-use std::path::Path;
+use std::{ops::Range, path::Path};
 
 use crate::{
     app::{App, InputMode, ViewMode},
@@ -267,16 +267,18 @@ fn draw_diff(frame: &mut Frame<'_>, area: Rect, app: &App) {
         })
         .unwrap_or_else(|| "Diff".to_string());
     let active_path = app.active_path().map(|path| path.as_path());
+    let block = Block::default().title(title).borders(Borders::ALL);
+    let inner = block.inner(area);
+    let visible_height = inner.height as usize;
+    let visible = visible_diff_range(app, visible_height);
     let lines: Vec<Line<'_>> = app
         .diff
+        .get(visible)
+        .unwrap_or(&[])
         .iter()
         .map(|line| render_diff_line(line, active_path))
         .collect();
-    let block = Block::default().title(title).borders(Borders::ALL);
-    let inner = block.inner(area);
-    let mut paragraph = Paragraph::new(lines)
-        .block(block)
-        .scroll((app.diff_scroll, 0));
+    let mut paragraph = Paragraph::new(lines).block(block);
 
     if app.wrap_diff {
         paragraph = paragraph.wrap(Wrap { trim: false });
@@ -285,8 +287,7 @@ fn draw_diff(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(paragraph, area);
 
     if app.diff.len() > inner.height as usize {
-        let mut scrollbar_state =
-            ScrollbarState::new(app.diff.len()).position(app.diff_scroll as usize);
+        let mut scrollbar_state = ScrollbarState::new(app.diff.len()).position(app.diff_scroll);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight),
             area,
@@ -404,15 +405,31 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 }
 
 fn hunk_position_label(app: &App) -> String {
-    let positions = app.hunk_positions();
-    if positions.is_empty() {
+    if app.diff_hunks.is_empty() {
         return "hunks 0/0".to_string();
     }
-    let current = positions
+    let current = app
+        .diff_hunks
         .iter()
-        .position(|position| *position >= app.diff_scroll as usize)
-        .unwrap_or_else(|| positions.len().saturating_sub(1));
-    format!("hunks {}/{}", current.saturating_add(1), positions.len())
+        .position(|position| *position >= app.diff_scroll)
+        .unwrap_or_else(|| app.diff_hunks.len().saturating_sub(1));
+    format!(
+        "hunks {}/{}",
+        current.saturating_add(1),
+        app.diff_hunks.len()
+    )
+}
+
+fn visible_diff_range(app: &App, visible_height: usize) -> Range<usize> {
+    if app.diff.is_empty() || visible_height == 0 {
+        return 0..0;
+    }
+
+    let start = app.diff_scroll.min(app.diff.len().saturating_sub(1));
+    let end = start
+        .saturating_add(visible_height.saturating_add(1))
+        .min(app.diff.len());
+    start..end
 }
 
 fn status_badge(status: &str) -> Span<'_> {
@@ -601,5 +618,31 @@ mod tests {
             .collect();
 
         assert_eq!(text, "       3 +  let answer = 42;");
+    }
+
+    #[test]
+    fn visible_diff_range_only_includes_viewport_lines() {
+        let mut app = App::new(Path::new(".").to_path_buf());
+        app.set_diff(
+            (0..10_000)
+                .map(|line| DiffLine::context(line.to_string()))
+                .collect(),
+        );
+        app.diff_scroll = 9_900;
+
+        assert_eq!(visible_diff_range(&app, 20), 9_900..9_921);
+    }
+
+    #[test]
+    fn visible_diff_range_handles_scroll_past_end() {
+        let mut app = App::new(Path::new(".").to_path_buf());
+        app.set_diff(
+            (0..10)
+                .map(|line| DiffLine::context(line.to_string()))
+                .collect(),
+        );
+        app.diff_scroll = 999;
+
+        assert_eq!(visible_diff_range(&app, 20), 9..10);
     }
 }

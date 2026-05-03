@@ -1,5 +1,7 @@
 # gwatch
 
+[![CI](https://github.com/connorcarro/gwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/connorcarro/gwatch/actions/workflows/ci.yml)
+
 Read-only realtime Git working-tree diff TUI.
 
 `gwatch` helps you monitor **uncommitted code changes** in a Git repository: staged changes, unstaged changes, deleted files, renamed files, and untracked files. It is designed for review-heavy workflows where another terminal, editor, script, or AI coding agent is actively editing files and you want a live terminal view of what changed.
@@ -57,10 +59,18 @@ The app opens a full-screen terminal UI with:
 - split view and full-width diff view
 - filtering, sorting, pinning, hunk navigation, mouse-wheel scrolling, and line wrapping
 - session scope, which hides changes that existed before `gwatch` started and shows only files touched or added during the current watch session
+- large-diff protection: diff output is streamed, rendering is virtualized to the visible terminal rows, hunk positions are cached, and extreme diffs are truncated to keep the TUI responsive
 
 `gwatch` shells out to Git for status and diffs, watches filesystem events, and debounces refreshes so rapid editor or agent writes do not constantly redraw the UI.
 
-Syntax highlighting is powered by `syntect`, using bundled Sublime Text syntax definitions for a broad set of file extensions.
+Syntax highlighting is powered by `syntect`, using bundled Sublime Text syntax definitions plus `gwatch` aliases for many modern file types that do not always have exact bundled grammars. Common Rust, C/C++, Go, Java, C#, Swift, JavaScript, TypeScript, JSX/TSX, Python, Ruby, PHP, shell, PowerShell, SQL, HTML, CSS, SCSS, Markdown, JSON, TOML, YAML, Terraform, Dockerfile, Makefile, protobuf, XML, SVG, and config files are highlighted.
+
+By default, a single diff preview is capped at 200,000 lines. This prevents massive generated files or multi-million-line changes from freezing the terminal. To raise or lower that limit for your machine, set `GWATCH_MAX_DIFF_LINES` before launching:
+
+```powershell
+$env:GWATCH_MAX_DIFF_LINES = "500000"
+gwatch
+```
 
 ## Testing It
 
@@ -114,6 +124,28 @@ cargo test --all-targets --all-features
 cargo package --allow-dirty --offline --no-verify
 ```
 
+## GitHub Tests
+
+This repository includes a GitHub Actions workflow at `.github/workflows/ci.yml`. It runs automatically on every push and pull request, and you can also start it manually from GitHub with **Actions** -> **CI** -> **Run workflow**.
+
+The workflow has four jobs:
+
+- **Format**: runs `cargo fmt -- --check` on Ubuntu.
+- **Test**: runs `cargo clippy --locked --all-targets --all-features -- -D warnings` and `cargo test --locked --all-targets --all-features` on Ubuntu, Windows, and macOS.
+- **MSRV**: runs `cargo check --locked --all-targets --all-features` on Rust 1.85, matching the `rust-version` in `Cargo.toml`.
+- **Package**: runs `cargo package --locked` to verify the crate can be packaged cleanly.
+
+How to use it on GitHub:
+
+1. Push the repo to GitHub.
+2. Open the repository page and click the **Actions** tab.
+3. Click the latest **CI** run.
+4. A green check means formatting, linting, tests, minimum Rust version, and packaging all passed.
+5. If a job fails, open the failed job, expand the failed command, fix the reported error locally, then push again.
+6. To re-run without pushing, open the failed workflow run and use **Re-run jobs**.
+
+The CI badge at the top of this README will show the current status after the workflow exists on GitHub.
+
 ## Architecture
 
 The codebase is split by responsibility:
@@ -124,6 +156,7 @@ The codebase is split by responsibility:
 - `app`: review cockpit state, sorting, filtering, pinning, hunk navigation
 - `git`: Git repository discovery, status parsing, diff loading
 - `diff`: unified diff model and parser
+- `syntax`: syntax highlighting and extension aliases
 - `ui`: ratatui rendering and terminal components
 
 ## License
