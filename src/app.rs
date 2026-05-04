@@ -141,11 +141,11 @@ impl App {
             return;
         }
 
-        if let Some(path) = previous
-            && let Some(index) = self.files.iter().position(|file| &file.path == path)
-        {
-            self.selected = index;
-            return;
+        if let Some(path) = previous {
+            if let Some(index) = self.files.iter().position(|file| &file.path == path) {
+                self.selected = index;
+                return;
+            }
         }
 
         self.selected = self.selected.min(self.files.len().saturating_sub(1));
@@ -367,14 +367,13 @@ impl App {
             return Ok(Vec::new());
         };
 
-        if let Some(cache) = &self.diff_line_cache
-            && cache.range.start <= range.start
-            && cache.range.end >= range.end
-        {
-            let start = range.start - cache.range.start;
-            let end = start + (range.end - range.start);
-            if end <= cache.lines.len() {
-                return Ok(cache.lines[start..end].to_vec());
+        if let Some(cache) = &self.diff_line_cache {
+            if cache.range.start <= range.start && cache.range.end >= range.end {
+                let start = range.start - cache.range.start;
+                let end = start + (range.end - range.start);
+                if end <= cache.lines.len() {
+                    return Ok(cache.lines[start..end].to_vec());
+                }
             }
         }
 
