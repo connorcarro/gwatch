@@ -1,5 +1,12 @@
 /target/
-test.md
-commit-and-push.ps1
-generate_lines.exe
-generate_lines.pdb
+/test.md
+/commit-and-push.ps1
+/output.txt
+
+# Local builds of the large test-file generator.
+/generate_lines
+/generate_lines.exe
+/generate_lines.pdb
+/tests/scripts/generate_lines
+/tests/scripts/generate_lines.exe
+/tests/scripts/generate_lines.pdb

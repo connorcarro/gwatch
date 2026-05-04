@@ -82,6 +82,13 @@ For continuous realtime testing, run this in one terminal:
 
 Then run `gwatch` in another terminal. The script randomly adds or removes one line from `test.md` every second until you stop it with `Ctrl+C`.
 
+For larger generated test files, compile the helper under `tests/scripts`:
+
+```powershell
+rustc .\tests\scripts\generate_lines.rs -O
+.\generate_lines.exe 0.25 test.md
+```
+
 ## Controls
 
 - `j`/`Down`: next file
