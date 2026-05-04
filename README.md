@@ -8,8 +8,6 @@
 
 # gwatch
 
----
-
 Read-only realtime terminal UI for reviewing Git working-tree changes.
 
 `gwatch` is built for the moment when files are changing quickly and `git status`
