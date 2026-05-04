@@ -17,7 +17,8 @@ $ArtifactPaths = @(
     "generate_lines",
     "tests/scripts/generate_lines.exe",
     "tests/scripts/generate_lines.pdb",
-    "tests/scripts/generate_lines"
+    "tests/scripts/generate_lines",
+    "output.txt"
 )
 
 function Invoke-Git {
