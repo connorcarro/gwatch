@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">gwatch diff hunk concept</title>
+  <desc id="desc">A compact diff hunk graphic with added and deleted lines.</desc>
+  <rect width="1280" height="360" fill="#0f1115"/>
+  <rect x="110" y="74" width="310" height="212" rx="14" fill="#151a21" stroke="#303846" stroke-width="3"/>
+  <rect x="135" y="106" width="72" height="18" rx="4" fill="#64748b"/>
+  <rect x="135" y="144" width="248" height="28" rx="6" fill="#3f1f25"/>
+  <text x="151" y="166" fill="#f87171" font-family="Consolas, Menlo, monospace" font-size="26" font-weight="700">-</text>
+  <rect x="135" y="184" width="248" height="28" rx="6" fill="#123524"/>
+  <text x="151" y="206" fill="#4ade80" font-family="Consolas, Menlo, monospace" font-size="26" font-weight="700">+</text>
+  <rect x="135" y="224" width="188" height="18" rx="4" fill="#334155"/>
+  <text x="470" y="180" fill="#f8fafc" font-family="Consolas, Menlo, monospace" font-size="94" font-weight="700">gwatch</text>
+  <text x="475" y="229" fill="#94a3b8" font-family="Consolas, Menlo, monospace" font-size="27">live working-tree review</text>
+</svg>
