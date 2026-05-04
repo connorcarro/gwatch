@@ -1,5 +1,3 @@
-# gwatch
-
 <p align="center">
   <img src="docs/assets/gwatch-banner.svg" alt="gwatch - live working-tree review" width="100%">
 </p>
@@ -7,6 +5,10 @@
 [![CI](https://github.com/connorcarro/gwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/connorcarro/gwatch/actions/workflows/ci.yml)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+# gwatch
+
+---
 
 Read-only realtime terminal UI for reviewing Git working-tree changes.
 
