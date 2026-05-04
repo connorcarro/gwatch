@@ -161,8 +161,15 @@ function Test-ArtifactHistory {
         throw "git rev-list --objects --all failed with exit code $LASTEXITCODE"
     }
 
-    $Pattern = ($Paths | ForEach-Object { [regex]::Escape($_) }) -join "|"
-    $Matches = @($Objects | Select-String -Pattern $Pattern)
+    $PathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($Path in $Paths) {
+        [void]$PathSet.Add($Path)
+    }
+
+    $Matches = @($Objects | Where-Object {
+        $Parts = $_ -split " ", 2
+        $Parts.Count -eq 2 -and $PathSet.Contains($Parts[1])
+    })
     return $Matches
 }
 
@@ -208,7 +215,7 @@ $Remaining = @(Test-ArtifactHistory -Paths $ArtifactPaths)
 if ($Remaining.Count -gt 0) {
     Write-Host ""
     Write-Host "These artifact paths still appear in reachable local history:"
-    $Remaining | ForEach-Object { Write-Host $_.Line }
+    $Remaining | ForEach-Object { Write-Host $_ }
     throw "Cleanup verification failed."
 }
 
