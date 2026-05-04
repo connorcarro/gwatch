@@ -2,11 +2,13 @@
   <img src="docs/assets/gwatch-banner.svg" alt="gwatch - live working-tree review" width="100%">
 </p>
 
-[![CI](https://github.com/connorcarro/gwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/connorcarro/gwatch/actions/workflows/ci.yml)
-[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/connorcarro/gwatch/actions/workflows/ci.yml"><img src="https://github.com/connorcarro/gwatch/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+</p>
 
-# gwatch
+<h1 align="center">gwatch</h1>
 
 Read-only realtime terminal UI for reviewing Git working-tree changes.
 
