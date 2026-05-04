@@ -119,14 +119,14 @@ function Invoke-FilterRepo {
         [string[]]$Paths
     )
 
-    $Command = Get-FilterRepoCommand
+    $Command = @(Get-FilterRepoCommand)
     $Args = @("--force")
     foreach ($Path in $Paths) {
         $Args += @("--path", $Path)
     }
     $Args += "--invert-paths"
 
-    if ($Command.Count -eq 1) {
+    if ($Command.Length -eq 1) {
         & $Command[0] @Args
     } else {
         & $Command[0] $Command[1] @Args
