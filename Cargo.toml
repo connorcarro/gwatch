@@ -10,7 +10,7 @@ repository = "https://github.com/connorcarro/gwatch"
 license = "MIT"
 keywords = ["git", "tui", "diff", "watch", "ratatui"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["generate.py", "kill-gwatch.ps1", "output.txt", "tests/scripts/"]
+exclude = ["output.txt", "scripts/", "tests/scripts/"]
 
 [dependencies]
 anyhow = "1"

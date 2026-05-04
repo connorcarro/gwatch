@@ -90,7 +90,7 @@ cargo run -- --repo C:\path\to\repo
 This repository includes a Windows install helper:
 
 ```powershell
-.\install.ps1
+.\scripts\install.ps1
 ```
 
 The helper checks for the common Windows linker conflict where Rust accidentally
@@ -241,7 +241,7 @@ gwatch
 For continuous realtime testing, run this in one terminal:
 
 ```powershell
-.\churn-test-file.ps1
+.\scripts\churn-test-file.ps1
 ```
 
 Then run `gwatch` in another terminal. The script randomly adds or removes one
@@ -295,7 +295,7 @@ winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --add M
 Then open a new PowerShell window and run:
 
 ```powershell
-.\install.ps1
+.\scripts\install.ps1
 ```
 
 ## License

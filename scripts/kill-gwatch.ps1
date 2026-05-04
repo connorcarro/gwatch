@@ -4,7 +4,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$repoRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).Path
 $currentPid = $PID
 
 function Test-GwatchProcess {

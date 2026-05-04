@@ -1,7 +1,7 @@
 /target/
 /test.md
-/commit-and-push.ps1
 /output.txt
+/commit-and-push.ps1
 
 # Local builds of the large test-file generator.
 /generate_lines

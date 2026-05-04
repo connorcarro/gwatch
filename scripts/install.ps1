@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$RepoPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoPath = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoPath
 
 $env:PATH = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
