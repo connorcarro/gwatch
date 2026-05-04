@@ -151,6 +151,7 @@ the view will refresh automatically.
 | `N` | Jump to previous diff hunk |
 | Mouse wheel | Scroll the diff |
 | `Ctrl` + mouse wheel | Accelerated scroll for large diffs |
+| `Ctrl` + `u` | Clear the filter input while filtering |
 | `?` | Toggle help |
 | `q`, `Esc` | Quit or close overlay |
 
