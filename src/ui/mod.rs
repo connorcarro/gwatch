@@ -620,7 +620,7 @@ mod tests {
     fn visible_diff_range_only_includes_viewport_lines() {
         let mut app = App::new(Path::new(".").to_path_buf());
         app.set_diff(
-            crate::diff_document::DiffDocument::from_lines(
+            crate::diff::document::DiffDocument::from_lines(
                 (0..10_000).map(|line| DiffLine::context(line.to_string())),
             )
             .unwrap(),
@@ -634,7 +634,7 @@ mod tests {
     fn visible_diff_range_handles_scroll_past_end() {
         let mut app = App::new(Path::new(".").to_path_buf());
         app.set_diff(
-            crate::diff_document::DiffDocument::from_lines(
+            crate::diff::document::DiffDocument::from_lines(
                 (0..10).map(|line| DiffLine::context(line.to_string())),
             )
             .unwrap(),

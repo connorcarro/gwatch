@@ -7,9 +7,9 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::{
-    diff::{DiffLine, DiffParser},
-    diff_document::{AsyncDiffWriter, DiffDocument},
+use crate::diff::{
+    DiffLine, DiffParser,
+    document::{AsyncDiffWriter, DiffDocument},
 };
 
 #[cfg(test)]

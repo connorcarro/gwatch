@@ -8,8 +8,7 @@ use std::{
 use anyhow::Result;
 
 use crate::{
-    diff::DiffLine,
-    diff_document::DiffDocument,
+    diff::{DiffLine, document::DiffDocument},
     git::{
         ChangedFile, FileStatus, display_path, git_branch, git_changed_files, git_diff_for_status,
     },

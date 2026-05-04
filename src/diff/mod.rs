@@ -1,3 +1,5 @@
+pub mod document;
+
 #[derive(Debug, Clone)]
 pub struct DiffLine {
     pub kind: DiffKind,
