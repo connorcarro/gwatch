@@ -6,8 +6,6 @@
   <a href="https://github.com/connorcarro/gwatch/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/CI-passing-2f6f5e?style=for-the-badge" alt="CI status"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-1.85%2B-ce422b?style=for-the-badge" alt="Rust 1.85+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2f6f5e?style=for-the-badge" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/Interface-Terminal-31493f?style=for-the-badge" alt="Terminal interface">
-  <img src="https://img.shields.io/badge/Built%20with-Ratatui-38bdf8?style=for-the-badge" alt="Built with ratatui">
   <img src="https://img.shields.io/badge/Package-Cargo-9333ea?style=for-the-badge" alt="Cargo package">
 </p>
 
