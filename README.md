@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/connorcarro/gwatch/actions/workflows/ci.yml"><img src="https://github.com/connorcarro/gwatch/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/interface-terminal-334155.svg" alt="Terminal interface">
-  <img src="https://img.shields.io/badge/built%20with-ratatui-38bdf8.svg" alt="Built with ratatui">
-  <img src="https://img.shields.io/badge/package-cargo-9333ea.svg" alt="Cargo package">
+  <a href="https://github.com/connorcarro/gwatch/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/connorcarro/gwatch/ci.yml?style=flat-square&label=CI" alt="CI status"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange?style=flat-square" alt="Rust 1.85+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/interface-terminal-334155?style=flat-square" alt="Terminal interface">
+  <img src="https://img.shields.io/badge/built%20with-ratatui-38bdf8?style=flat-square" alt="Built with ratatui">
+  <img src="https://img.shields.io/badge/package-cargo-9333ea?style=flat-square" alt="Cargo package">
 </p>
 
 <h1 align="center">gwatch</h1>
